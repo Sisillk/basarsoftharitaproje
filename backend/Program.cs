@@ -17,7 +17,7 @@ builder.Services.AddScoped<IUserService, UserService>();
 builder.Services.AddScoped<IGeometryRepository, GeometryRepository>();
 builder.Services.AddScoped<IGeometryService, GeometryService>();
 
-// LOGIN TOKEN SERVISI
+
 builder.Services.AddScoped<TokenService>();
 
 builder.Services.AddCors(options =>

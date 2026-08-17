@@ -1,5 +1,6 @@
 using backend_new.Interfaces;
 using backend_new.Models;
+
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -12,74 +13,286 @@ namespace backend_new.Controllers
     {
         private readonly IGeometryService _geometryService;
 
-        public GeometryController(IGeometryService geometryService)
+        public GeometryController(
+            IGeometryService geometryService)
         {
             _geometryService = geometryService;
         }
 
-        [HttpPost("point")]
-        public async Task<IActionResult> AddPoint(GeometryRequest request)
+        private int GetCurrentUserId()
         {
-            await _geometryService.AddPointAsync(
-                request.Wkt,
-                request.Name,
-                request.Color
-            );
+            var claim =
+                User.FindFirst("user_id");
 
-            return Ok(new { message = "Point kaydedildi." });
+            if (
+                claim == null ||
+                !int.TryParse(
+                    claim.Value,
+                    out int userId
+                )
+            )
+            {
+                throw new UnauthorizedAccessException(
+                    "Kullanıcı bilgisi bulunamadı."
+                );
+            }
+
+            return userId;
+        }
+
+        [HttpPost("point")]
+        public async Task<IActionResult> AddPoint(
+            GeometryRequest request)
+        {
+            try
+            {
+                int userId = GetCurrentUserId();
+
+                int id =
+                    await _geometryService.AddPointAsync(
+                        request.Wkt,
+                        request.Name,
+                        request.Color,
+                        userId
+                    );
+
+                return Ok(new
+                {
+                    id,
+                    message = "Point kaydedildi."
+                });
+            }
+            catch (Exception ex)
+            {
+                return HandleException(ex);
+            }
         }
 
         [HttpPost("line")]
-        public async Task<IActionResult> AddLine(GeometryRequest request)
+        public async Task<IActionResult> AddLine(
+            GeometryRequest request)
         {
-            await _geometryService.AddLineAsync(
-                request.Wkt,
-                request.Name,
-                request.Color
-            );
+            try
+            {
+                int userId = GetCurrentUserId();
 
-            return Ok(new { message = "Line kaydedildi." });
+                int id =
+                    await _geometryService.AddLineAsync(
+                        request.Wkt,
+                        request.Name,
+                        request.Color,
+                        userId
+                    );
+
+                return Ok(new
+                {
+                    id,
+                    message = "Line kaydedildi."
+                });
+            }
+            catch (Exception ex)
+            {
+                return HandleException(ex);
+            }
         }
 
         [HttpPost("polygon")]
-        public async Task<IActionResult> AddPolygon(GeometryRequest request)
+        public async Task<IActionResult> AddPolygon(
+            GeometryRequest request)
         {
-            await _geometryService.AddPolygonAsync(
-                request.Wkt,
-                request.Name,
-                request.Color
-            );
+            try
+            {
+                int userId = GetCurrentUserId();
 
-            return Ok(new { message = "Polygon kaydedildi." });
+                int id =
+                    await _geometryService.AddPolygonAsync(
+                        request.Wkt,
+                        request.Name,
+                        request.Color,
+                        userId
+                    );
+
+                return Ok(new
+                {
+                    id,
+                    message = "Polygon kaydedildi."
+                });
+            }
+            catch (Exception ex)
+            {
+                return HandleException(ex);
+            }
         }
 
         [HttpGet("all")]
         public async Task<IActionResult> GetAll()
         {
-            var points = await _geometryService.GetPointsAsync();
-            var lines = await _geometryService.GetLinesAsync();
-            var polygons = await _geometryService.GetPolygonsAsync();
-
-            return Ok(new
+            try
             {
-                points,
-                lines,
-                polygons
-            });
+                int userId = GetCurrentUserId();
+
+                var points =
+                    await _geometryService.GetPointsAsync(
+                        userId
+                    );
+
+                var lines =
+                    await _geometryService.GetLinesAsync(
+                        userId
+                    );
+
+                var polygons =
+                    await _geometryService.GetPolygonsAsync(
+                        userId
+                    );
+
+                return Ok(new
+                {
+                    points,
+                    lines,
+                    polygons
+                });
+            }
+            catch (Exception ex)
+            {
+                return HandleException(ex);
+            }
         }
 
         [HttpPost("inventory-count")]
-        public async Task<IActionResult> GetInventoryCount(
+        public async Task<IActionResult>
+            GetInventoryCount(
+                GeometryRequest request)
+        {
+            try
+            {
+                var count =
+                    await _geometryService
+                        .GetIntersectingInventoryCountAsync(
+                            request.Wkt
+                        );
+
+                return Ok(new
+                {
+                    count
+                });
+            }
+            catch (Exception ex)
+            {
+                return HandleException(ex);
+            }
+        }
+
+        [HttpPut("{type}/{id:int}")]
+        public async Task<IActionResult> Update(
+            string type,
+            int id,
             GeometryRequest request)
         {
-            var count =
-                await _geometryService
-                    .GetIntersectingInventoryCountAsync(request.Wkt);
-
-            return Ok(new
+            try
             {
-                count
-            });
+                int userId = GetCurrentUserId();
+
+                bool updated =
+                    await _geometryService
+                        .UpdateGeometryAsync(
+                            type,
+                            id,
+                            request.Wkt,
+                            request.Name,
+                            request.Color,
+                            userId
+                        );
+
+                if (!updated)
+                {
+                    return NotFound(new
+                    {
+                        message =
+                            "Güncellenecek obje bulunamadı."
+                    });
+                }
+
+                return Ok(new
+                {
+                    message =
+                        "Obje başarıyla güncellendi."
+                });
+            }
+            catch (Exception ex)
+            {
+                return HandleException(ex);
+            }
+        }
+
+        [HttpDelete("{type}/{id:int}")]
+        public async Task<IActionResult> Delete(
+            string type,
+            int id)
+        {
+            try
+            {
+                int userId = GetCurrentUserId();
+
+                bool deleted =
+                    await _geometryService
+                        .SoftDeleteGeometryAsync(
+                            type,
+                            id,
+                            userId
+                        );
+
+                if (!deleted)
+                {
+                    return NotFound(new
+                    {
+                        message =
+                            "Silinecek obje bulunamadı."
+                    });
+                }
+
+                return Ok(new
+                {
+                    message =
+                        "Obje başarıyla silindi."
+                });
+            }
+            catch (Exception ex)
+            {
+                return HandleException(ex);
+            }
+        }
+
+        private IActionResult HandleException(
+            Exception ex)
+        {
+            if (
+                ex is UnauthorizedAccessException
+            )
+            {
+                return Unauthorized(new
+                {
+                    message = ex.Message
+                });
+            }
+
+            if (ex is ArgumentException)
+            {
+                return BadRequest(new
+                {
+                    message = ex.Message
+                });
+            }
+
+            return StatusCode(
+                500,
+                new
+                {
+                    message =
+                        "İşlem sırasında beklenmeyen bir hata oluştu.",
+                    detail = ex.Message
+                }
+            );
         }
     }
 }

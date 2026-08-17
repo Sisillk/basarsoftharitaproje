@@ -7,6 +7,8 @@ import VectorLayer from 'ol/layer/Vector.js'
 import OSM from 'ol/source/OSM.js'
 import VectorSource from 'ol/source/Vector.js'
 import Draw from 'ol/interaction/Draw.js'
+import Modify from 'ol/interaction/Modify.js'
+import Collection from 'ol/Collection.js'
 import WKT from 'ol/format/WKT.js'
 import { fromLonLat } from 'ol/proj.js'
 
@@ -21,12 +23,16 @@ import { InputText } from 'primereact/inputtext'
 
 import 'ol/ol.css'
 
+const API_URL = 'http://localhost:5092/api/geometry'
+
 function MapPage({ onLogout }) {
   const mapElementRef = useRef(null)
   const mapRef = useRef(null)
   const vectorSourceRef = useRef(null)
   const analysisSourceRef = useRef(null)
   const drawRef = useRef(null)
+  const modifyRef = useRef(null)
+  const originalGeometryRef = useRef(null)
 
   const [selectedType, setSelectedType] = useState(null)
   const [message, setMessage] = useState('')
@@ -35,10 +41,16 @@ function MapPage({ onLogout }) {
   const [popupVisible, setPopupVisible] = useState(false)
   const [pendingFeature, setPendingFeature] = useState(null)
   const [pendingType, setPendingType] = useState(null)
-
   const [geometryName, setGeometryName] = useState('')
   const [geometryColor, setGeometryColor] = useState('#ff1744')
   const [saving, setSaving] = useState(false)
+
+  const [detailVisible, setDetailVisible] = useState(false)
+  const [selectedFeature, setSelectedFeature] = useState(null)
+  const [detailName, setDetailName] = useState('')
+  const [detailColor, setDetailColor] = useState('#ff1744')
+  const [detailSaving, setDetailSaving] = useState(false)
+  const [geometryEditing, setGeometryEditing] = useState(false)
 
   const createGeometryStyle = (feature) => {
     const geometry = feature.getGeometry()
@@ -96,6 +108,26 @@ function MapPage({ onLogout }) {
     }),
   })
 
+  const removeCurrentDrawInteraction = () => {
+    const map = mapRef.current
+
+    if (map && drawRef.current) {
+      map.removeInteraction(drawRef.current)
+      drawRef.current = null
+    }
+  }
+
+  const removeModifyInteraction = () => {
+    const map = mapRef.current
+
+    if (map && modifyRef.current) {
+      map.removeInteraction(modifyRef.current)
+      modifyRef.current = null
+    }
+
+    setGeometryEditing(false)
+  }
+
   useEffect(() => {
     const vectorSource = new VectorSource()
     const analysisSource = new VectorSource()
@@ -134,15 +166,12 @@ function MapPage({ onLogout }) {
       try {
         const token = localStorage.getItem('token')
 
-        const response = await fetch(
-          'http://localhost:5092/api/geometry/all',
-          {
-            method: 'GET',
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
-          }
-        )
+        const response = await fetch(`${API_URL}/all`, {
+          method: 'GET',
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        })
 
         if (response.status === 401) {
           onLogout()
@@ -156,33 +185,64 @@ function MapPage({ onLogout }) {
         const data = await response.json()
         const wktFormat = new WKT()
 
-        const addGeometry = (item) => {
+        const addGeometry = (item, type) => {
           const feature = wktFormat.readFeature(item.wkt, {
             dataProjection: 'EPSG:4326',
             featureProjection: 'EPSG:3857',
           })
 
           feature.set('id', item.id)
+          feature.set('type', type)
           feature.set('name', item.name)
           feature.set('color', item.color || '#ff1744')
 
           vectorSource.addFeature(feature)
         }
 
-        data.points.forEach(addGeometry)
-        data.lines.forEach(addGeometry)
-        data.polygons.forEach(addGeometry)
+        data.points.forEach((item) => addGeometry(item, 'point'))
+        data.lines.forEach((item) => addGeometry(item, 'line'))
+        data.polygons.forEach((item) => addGeometry(item, 'polygon'))
       } catch (error) {
         console.error(error)
-        setMessage('Kayıtlı çizimler yüklenemedi.')
+        setMessage('Kayıtlı çizimler yüklenemedi. Backend çalışıyor mu kontrol et.')
       }
     }
 
     loadSavedGeometries()
 
+    const handleMapClick = (event) => {
+      if (drawRef.current || modifyRef.current) return
+
+      const feature = map.forEachFeatureAtPixel(event.pixel, (foundFeature) => {
+        if (foundFeature.get('id') && foundFeature.get('type')) {
+          return foundFeature
+        }
+
+        return null
+      })
+
+      if (!feature) return
+
+      originalGeometryRef.current = feature.getGeometry().clone()
+
+      setSelectedFeature(feature)
+      setDetailName(feature.get('name') || '')
+      setDetailColor(feature.get('color') || '#ff1744')
+      setDetailVisible(true)
+      setMessage('')
+    }
+
+    map.on('singleclick', handleMapClick)
+
     return () => {
+      map.un('singleclick', handleMapClick)
+
       if (drawRef.current) {
         map.removeInteraction(drawRef.current)
+      }
+
+      if (modifyRef.current) {
+        map.removeInteraction(modifyRef.current)
       }
 
       map.setTarget(undefined)
@@ -216,21 +276,13 @@ function MapPage({ onLogout }) {
     return `${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`
   }
 
-  const removeCurrentDrawInteraction = () => {
-    const map = mapRef.current
-
-    if (map && drawRef.current) {
-      map.removeInteraction(drawRef.current)
-      drawRef.current = null
-    }
-  }
-
   const startDrawing = (type) => {
     const map = mapRef.current
 
     if (!map || !vectorSourceRef.current) return
 
     removeCurrentDrawInteraction()
+    removeModifyInteraction()
 
     setMessage('')
     setSelectedType(type)
@@ -261,6 +313,11 @@ function MapPage({ onLogout }) {
       setGeometryName('')
       setGeometryColor('#ff1744')
       setPopupVisible(true)
+
+      setTimeout(() => {
+        removeCurrentDrawInteraction()
+        setSelectedType(null)
+      }, 0)
     })
   }
 
@@ -274,21 +331,18 @@ function MapPage({ onLogout }) {
 
     const token = localStorage.getItem('token')
 
-    const response = await fetch(
-      'http://localhost:5092/api/geometry/inventory-count',
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          wkt,
-          name: '',
-          color: '',
-        }),
-      }
-    )
+    const response = await fetch(`${API_URL}/inventory-count`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        wkt,
+        name: '',
+        color: '',
+      }),
+    })
 
     if (response.status === 401) {
       onLogout()
@@ -324,31 +378,32 @@ function MapPage({ onLogout }) {
 
       const token = localStorage.getItem('token')
 
-      const response = await fetch(
-        `http://localhost:5092/api/geometry/${pendingType}`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({
-            wkt,
-            name: geometryName.trim(),
-            color: geometryColor,
-          }),
-        }
-      )
+      const response = await fetch(`${API_URL}/${pendingType}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          wkt,
+          name: geometryName.trim(),
+          color: geometryColor,
+        }),
+      })
 
       if (response.status === 401) {
         onLogout()
         return
       }
 
+      const data = await response.json()
+
       if (!response.ok) {
-        throw new Error('Kayıt başarısız.')
+        throw new Error(data.message || 'Kayıt başarısız.')
       }
 
+      pendingFeature.set('id', data.id)
+      pendingFeature.set('type', pendingType)
       pendingFeature.set('name', geometryName.trim())
       pendingFeature.set('color', geometryColor)
       pendingFeature.changed()
@@ -362,9 +417,7 @@ function MapPage({ onLogout }) {
           const count = await getInventoryCount(pendingFeature)
 
           if (count !== null) {
-            setMessage(
-              `Poligon kaydedildi. ${count} envanter ile kesişiyor.`
-            )
+            setMessage(`Poligon kaydedildi. ${count} envanter ile kesişiyor.`)
           }
         } catch (analysisError) {
           console.error(analysisError)
@@ -379,7 +432,7 @@ function MapPage({ onLogout }) {
       setGeometryColor('#ff1744')
     } catch (error) {
       console.error(error)
-      setMessage('Çizim veritabanına kaydedilemedi.')
+      setMessage(error.message || 'Çizim veritabanına kaydedilemedi.')
     } finally {
       setSaving(false)
     }
@@ -405,6 +458,7 @@ function MapPage({ onLogout }) {
     if (!map || !analysisSource) return
 
     removeCurrentDrawInteraction()
+    removeModifyInteraction()
     analysisSource.clear()
 
     setSelectedType('analysis')
@@ -423,9 +477,7 @@ function MapPage({ onLogout }) {
         const count = await getInventoryCount(event.feature)
 
         if (count !== null) {
-          setMessage(
-            `Envanter Analizi: ${count} envanter ile kesişiyor.`
-          )
+          setMessage(`Envanter Analizi: ${count} envanter ile kesişiyor.`)
         }
       } catch (error) {
         console.error(error)
@@ -450,8 +502,159 @@ function MapPage({ onLogout }) {
 
   const stopDrawing = () => {
     removeCurrentDrawInteraction()
+    removeModifyInteraction()
     setSelectedType(null)
     setMessage('')
+  }
+
+  const startGeometryEdit = () => {
+    const map = mapRef.current
+
+    if (!map || !selectedFeature) return
+
+    removeCurrentDrawInteraction()
+    removeModifyInteraction()
+
+    const modify = new Modify({
+      features: new Collection([selectedFeature]),
+    })
+
+    modifyRef.current = modify
+    map.addInteraction(modify)
+
+    setGeometryEditing(true)
+    setMessage('Haritadaki obje üzerinde nokta veya köşeleri sürükleyebilirsin.')
+  }
+
+  const cancelDetail = () => {
+    if (selectedFeature && originalGeometryRef.current) {
+      selectedFeature.setGeometry(originalGeometryRef.current.clone())
+      selectedFeature.changed()
+    }
+
+    removeModifyInteraction()
+    originalGeometryRef.current = null
+    setSelectedFeature(null)
+    setDetailVisible(false)
+    setDetailName('')
+    setDetailColor('#ff1744')
+    setMessage('')
+  }
+
+  const saveDetail = async () => {
+    if (!selectedFeature) return
+
+    if (!detailName.trim()) {
+      setMessage('İsim alanı boş bırakılamaz.')
+      return
+    }
+
+    setDetailSaving(true)
+    setMessage('')
+
+    try {
+      const id = selectedFeature.get('id')
+      const type = selectedFeature.get('type')
+      const token = localStorage.getItem('token')
+      const wktFormat = new WKT()
+
+      const wkt = wktFormat.writeFeature(selectedFeature, {
+        featureProjection: 'EPSG:3857',
+        dataProjection: 'EPSG:4326',
+      })
+
+      const response = await fetch(`${API_URL}/${type}/${id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          wkt,
+          name: detailName.trim(),
+          color: detailColor,
+        }),
+      })
+
+      if (response.status === 401) {
+        onLogout()
+        return
+      }
+
+      const data = await response.json()
+
+      if (!response.ok) {
+        throw new Error(data.message || 'Güncelleme başarısız.')
+      }
+
+      selectedFeature.set('name', detailName.trim())
+      selectedFeature.set('color', detailColor)
+      selectedFeature.changed()
+
+      removeModifyInteraction()
+      originalGeometryRef.current = null
+      setSelectedFeature(null)
+      setDetailVisible(false)
+      setMessage('Obje başarıyla güncellendi.')
+    } catch (error) {
+      console.error(error)
+      setMessage(error.message || 'Obje güncellenemedi.')
+    } finally {
+      setDetailSaving(false)
+    }
+  }
+
+  const deleteSelectedFeature = async () => {
+    if (!selectedFeature) return
+
+    const confirmed = window.confirm(
+      'Bu objeyi silmek istediğine emin misin? Kayıt veritabanından tamamen silinmeyecek.'
+    )
+
+    if (!confirmed) return
+
+    setDetailSaving(true)
+    setMessage('')
+
+    try {
+      const id = selectedFeature.get('id')
+      const type = selectedFeature.get('type')
+      const token = localStorage.getItem('token')
+
+      const response = await fetch(`${API_URL}/${type}/${id}`, {
+        method: 'DELETE',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      })
+
+      if (response.status === 401) {
+        onLogout()
+        return
+      }
+
+      const data = await response.json()
+
+      if (!response.ok) {
+        throw new Error(data.message || 'Silme işlemi başarısız.')
+      }
+
+      removeModifyInteraction()
+
+      if (vectorSourceRef.current) {
+        vectorSourceRef.current.removeFeature(selectedFeature)
+      }
+
+      originalGeometryRef.current = null
+      setSelectedFeature(null)
+      setDetailVisible(false)
+      setMessage('Obje başarıyla silindi.')
+    } catch (error) {
+      console.error(error)
+      setMessage(error.message || 'Obje silinemedi.')
+    } finally {
+      setDetailSaving(false)
+    }
   }
 
   const popupFooter = (
@@ -470,6 +673,38 @@ function MapPage({ onLogout }) {
         onClick={savePendingGeometry}
         disabled={saving}
       />
+    </div>
+  )
+
+  const detailFooter = (
+    <div
+      className="popup-footer"
+      style={{ justifyContent: 'space-between' }}
+    >
+      <Button
+        label="Sil"
+        icon="pi pi-trash"
+        severity="danger"
+        onClick={deleteSelectedFeature}
+        disabled={detailSaving}
+      />
+
+      <div style={{ display: 'flex', gap: '10px' }}>
+        <Button
+          label="İptal"
+          icon="pi pi-times"
+          severity="secondary"
+          onClick={cancelDetail}
+          disabled={detailSaving}
+        />
+
+        <Button
+          label={detailSaving ? 'Kaydediliyor...' : 'Kaydet'}
+          icon="pi pi-check"
+          onClick={saveDetail}
+          disabled={detailSaving}
+        />
+      </div>
     </div>
   )
 
@@ -590,6 +825,70 @@ function MapPage({ onLogout }) {
                 {geometryColor}
               </span>
             </div>
+          </div>
+        </div>
+      </Dialog>
+
+      <Dialog
+        header="Obje Detayı"
+        visible={detailVisible}
+        style={{ width: '440px' }}
+        modal={false}
+        closable={!detailSaving}
+        draggable
+        onHide={cancelDetail}
+        footer={detailFooter}
+      >
+        <div className="popup-body">
+          <div className="popup-field">
+            <label htmlFor="detailName">
+              İsim
+            </label>
+
+            <InputText
+              id="detailName"
+              value={detailName}
+              onChange={(e) => setDetailName(e.target.value)}
+            />
+          </div>
+
+          <div className="popup-field">
+            <label htmlFor="detailColor">
+              Renk
+            </label>
+
+            <div className="color-field">
+              <input
+                id="detailColor"
+                type="color"
+                value={detailColor}
+                onChange={(e) => setDetailColor(e.target.value)}
+              />
+
+              <span>
+                {detailColor}
+              </span>
+            </div>
+          </div>
+
+          <div className="popup-field">
+            <label>
+              Geometri
+            </label>
+
+            <Button
+              label={geometryEditing ? 'Düzenleme Açık' : 'Haritada Geometriyi Düzenle'}
+              icon="pi pi-pencil"
+              severity={geometryEditing ? 'success' : 'secondary'}
+              onClick={startGeometryEdit}
+              disabled={geometryEditing || detailSaving}
+            />
+
+            <small>
+              {geometryEditing
+                ? 'Pencereyi kenara sürükleyip haritadaki noktayı veya köşeleri hareket ettir. Sonra Kaydet.'
+                : 'Bu butona bastıktan sonra objenin konumunu harita üzerinden değiştirebilirsin.'}
+            </small>
           </div>
         </div>
       </Dialog>

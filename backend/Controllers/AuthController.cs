@@ -10,32 +10,58 @@ namespace backend_new.Controllers
     {
         private readonly TokenService _tokenService;
 
-        public AuthController(TokenService tokenService)
+        public AuthController(
+            TokenService tokenService)
         {
             _tokenService = tokenService;
         }
 
         [HttpPost("login")]
-        public IActionResult Login(LoginRequest request)
+        public IActionResult Login(
+            LoginRequest request)
         {
-            if (
-                request.Username == "sisilkadioglu" &&
-                request.Password == "2005"
-            )
+            try
             {
-                var token = _tokenService.CreateToken(request.Username);
-
-                return Ok(new
+                if (
+                    request.Username == "sisilkadioglu" &&
+                    request.Password == "2005"
+                )
                 {
-                    token,
-                    expiresIn = 600
+                    // Demo kullanıcımızın ID'si
+                    int userId = 1;
+
+                    var token =
+                        _tokenService.CreateToken(
+                            request.Username,
+                            userId
+                        );
+
+                    return Ok(new
+                    {
+                        token,
+                        expiresIn = 600,
+                        userId
+                    });
+                }
+
+                return Unauthorized(new
+                {
+                    message =
+                        "Kullanıcı adı veya şifre yanlış."
                 });
             }
-
-            return Unauthorized(new
+            catch (Exception ex)
             {
-                message = "Kullanıcı adı veya şifre yanlış."
-            });
+                return StatusCode(
+                    500,
+                    new
+                    {
+                        message =
+                            "Giriş işlemi sırasında bir hata oluştu.",
+                        detail = ex.Message
+                    }
+                );
+            }
         }
     }
 }

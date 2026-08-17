@@ -15,7 +15,9 @@ namespace backend_new.Services
             _configuration = configuration;
         }
 
-        public string CreateToken(string username)
+        public string CreateToken(
+            string username,
+            int userId)
         {
             var jwtKey =
                 _configuration["Jwt:Key"]
@@ -28,6 +30,11 @@ namespace backend_new.Services
                 new Claim(
                     ClaimTypes.Name,
                     username
+                ),
+
+                new Claim(
+                    "user_id",
+                    userId.ToString()
                 )
             };
 
