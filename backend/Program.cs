@@ -11,29 +11,86 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddControllers();
 
-builder.Services.AddScoped<IUserRepository, UserRepository>();
-builder.Services.AddScoped<IUserService, UserService>();
 
-builder.Services.AddScoped<IGeometryRepository, GeometryRepository>();
-builder.Services.AddScoped<IGeometryService, GeometryService>();
+// -------------------------
+// USER
+// -------------------------
 
+builder.Services.AddScoped<
+    IUserRepository,
+    UserRepository
+>();
+
+builder.Services.AddScoped<
+    IUserService,
+    UserService
+>();
+
+
+// -------------------------
+// GEOMETRY
+// -------------------------
+
+builder.Services.AddScoped<
+    IGeometryRepository,
+    GeometryRepository
+>();
+
+builder.Services.AddScoped<
+    IGeometryService,
+    GeometryService
+>();
+
+
+// -------------------------
+// ADMIN
+// -------------------------
+
+builder.Services.AddScoped<
+    IAdminRepository,
+    AdminRepository
+>();
+
+builder.Services.AddScoped<
+    IAdminService,
+    AdminService
+>();
+
+
+// -------------------------
+// TOKEN
+// -------------------------
 
 builder.Services.AddScoped<TokenService>();
 
+
+// -------------------------
+// CORS
+// -------------------------
+
 builder.Services.AddCors(options =>
 {
-    options.AddPolicy("ReactPolicy", policy =>
-    {
-        policy
-            .AllowAnyOrigin()
-            .AllowAnyHeader()
-            .AllowAnyMethod();
-    });
+    options.AddPolicy(
+        "ReactPolicy",
+        policy =>
+        {
+            policy
+                .AllowAnyOrigin()
+                .AllowAnyHeader()
+                .AllowAnyMethod();
+        }
+    );
 });
+
+
+// -------------------------
+// JWT
+// -------------------------
 
 builder.Services
     .AddAuthentication(
-        JwtBearerDefaults.AuthenticationScheme
+        JwtBearerDefaults
+            .AuthenticationScheme
     )
     .AddJwtBearer(options =>
     {
@@ -46,19 +103,26 @@ builder.Services
                 ValidateIssuerSigningKey = true,
 
                 ValidIssuer =
-                    builder.Configuration["Jwt:Issuer"],
+                    builder.Configuration[
+                        "Jwt:Issuer"
+                    ],
 
                 ValidAudience =
-                    builder.Configuration["Jwt:Audience"],
+                    builder.Configuration[
+                        "Jwt:Audience"
+                    ],
 
                 IssuerSigningKey =
                     new SymmetricSecurityKey(
                         Encoding.UTF8.GetBytes(
-                            builder.Configuration["Jwt:Key"]!
+                            builder.Configuration[
+                                "Jwt:Key"
+                            ]!
                         )
                     ),
 
-                ClockSkew = TimeSpan.Zero
+                ClockSkew =
+                    TimeSpan.Zero
             };
     });
 

@@ -25,7 +25,7 @@ import 'ol/ol.css'
 
 const API_URL = 'http://localhost:5092/api/geometry'
 
-function MapPage({ onLogout }) {
+function MapPage({ token, onLogout, onOpenAdmin }) {
   const mapElementRef = useRef(null)
   const mapRef = useRef(null)
   const vectorSourceRef = useRef(null)
@@ -51,6 +51,13 @@ function MapPage({ onLogout }) {
   const [detailColor, setDetailColor] = useState('#ff1744')
   const [detailSaving, setDetailSaving] = useState(false)
   const [geometryEditing, setGeometryEditing] = useState(false)
+
+  const [permissionNames, setPermissionNames] = useState([])
+  const [isAdmin, setIsAdmin] = useState(false)
+
+  const hasPermission = (permissionName) => {
+    return permissionNames.includes(permissionName)
+  }
 
   const createGeometryStyle = (feature) => {
     const geometry = feature.getGeometry()
@@ -204,7 +211,9 @@ function MapPage({ onLogout }) {
         data.polygons.forEach((item) => addGeometry(item, 'polygon'))
       } catch (error) {
         console.error(error)
-        setMessage('Kayıtlı çizimler yüklenemedi. Backend çalışıyor mu kontrol et.')
+        setMessage(
+          'Kayıtlı çizimler yüklenemedi. Backend çalışıyor mu kontrol et.'
+        )
       }
     }
 
@@ -213,21 +222,30 @@ function MapPage({ onLogout }) {
     const handleMapClick = (event) => {
       if (drawRef.current || modifyRef.current) return
 
-      const feature = map.forEachFeatureAtPixel(event.pixel, (foundFeature) => {
-        if (foundFeature.get('id') && foundFeature.get('type')) {
-          return foundFeature
-        }
+      const feature = map.forEachFeatureAtPixel(
+        event.pixel,
+        (foundFeature) => {
+          if (
+            foundFeature.get('id') &&
+            foundFeature.get('type')
+          ) {
+            return foundFeature
+          }
 
-        return null
-      })
+          return null
+        }
+      )
 
       if (!feature) return
 
-      originalGeometryRef.current = feature.getGeometry().clone()
+      originalGeometryRef.current =
+        feature.getGeometry().clone()
 
       setSelectedFeature(feature)
       setDetailName(feature.get('name') || '')
-      setDetailColor(feature.get('color') || '#ff1744')
+      setDetailColor(
+        feature.get('color') || '#ff1744'
+      )
       setDetailVisible(true)
       setMessage('')
     }
@@ -238,11 +256,15 @@ function MapPage({ onLogout }) {
       map.un('singleclick', handleMapClick)
 
       if (drawRef.current) {
-        map.removeInteraction(drawRef.current)
+        map.removeInteraction(
+          drawRef.current
+        )
       }
 
       if (modifyRef.current) {
-        map.removeInteraction(modifyRef.current)
+        map.removeInteraction(
+          modifyRef.current
+        )
       }
 
       map.setTarget(undefined)
@@ -251,35 +273,115 @@ function MapPage({ onLogout }) {
   }, [onLogout])
 
   useEffect(() => {
+    if (!token) return
+
+    const loadAuthorization = async () => {
+      try {
+        const response = await fetch(
+          'http://localhost:5092/api/authorization/me',
+          {
+            method: 'GET',
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          }
+        )
+
+        if (response.status === 401) {
+          onLogout()
+          return
+        }
+
+        if (!response.ok) {
+          throw new Error(
+            'Yetki bilgileri alınamadı.'
+          )
+        }
+
+        const data = await response.json()
+
+        setPermissionNames(
+          data.permissionNames || []
+        )
+
+        setIsAdmin(
+          data.isAdmin || false
+        )
+      } catch (error) {
+        console.error(
+          'Yetki bilgileri alınamadı:',
+          error
+        )
+      }
+    }
+
+    loadAuthorization()
+  }, [token, onLogout])
+
+  useEffect(() => {
     const updateTimer = () => {
-      const expiration = Number(localStorage.getItem('expiration'))
-      const difference = expiration - Date.now()
+      const expiration =
+        Number(
+          localStorage.getItem(
+            'expiration'
+          )
+        )
+
+      const difference =
+        expiration - Date.now()
 
       if (difference <= 0) {
         setRemainingTime(0)
         return
       }
 
-      setRemainingTime(Math.ceil(difference / 1000))
+      setRemainingTime(
+        Math.ceil(
+          difference / 1000
+        )
+      )
     }
 
     updateTimer()
-    const timer = setInterval(updateTimer, 1000)
 
-    return () => clearInterval(timer)
+    const timer =
+      setInterval(
+        updateTimer,
+        1000
+      )
+
+    return () =>
+      clearInterval(timer)
   }, [])
 
   const formatTime = (seconds) => {
-    const minutes = Math.floor(seconds / 60)
-    const secs = seconds % 60
+    const minutes =
+      Math.floor(
+        seconds / 60
+      )
 
-    return `${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`
+    const secs =
+      seconds % 60
+
+    return `${String(minutes).padStart(
+      2,
+      '0'
+    )}:${String(secs).padStart(
+      2,
+      '0'
+    )}`
   }
 
   const startDrawing = (type) => {
-    const map = mapRef.current
+    const map =
+      mapRef.current
 
-    if (!map || !vectorSourceRef.current) return
+    if (
+      !map ||
+      !vectorSourceRef.current
+    ) {
+      return
+    }
 
     removeCurrentDrawInteraction()
     removeModifyInteraction()
@@ -292,370 +394,745 @@ function MapPage({ onLogout }) {
     if (type === 'point') {
       geometryType = 'Point'
     } else if (type === 'line') {
-      geometryType = 'LineString'
+      geometryType =
+        'LineString'
     } else if (type === 'polygon') {
-      geometryType = 'Polygon'
+      geometryType =
+        'Polygon'
     } else {
       return
     }
 
-    const draw = new Draw({
-      source: vectorSourceRef.current,
-      type: geometryType,
-    })
+    const draw =
+      new Draw({
+        source:
+          vectorSourceRef.current,
 
-    drawRef.current = draw
-    map.addInteraction(draw)
-
-    draw.on('drawend', (event) => {
-      setPendingFeature(event.feature)
-      setPendingType(type)
-      setGeometryName('')
-      setGeometryColor('#ff1744')
-      setPopupVisible(true)
-
-      setTimeout(() => {
-        removeCurrentDrawInteraction()
-        setSelectedType(null)
-      }, 0)
-    })
-  }
-
-  const getInventoryCount = async (feature) => {
-    const wktFormat = new WKT()
-
-    const wkt = wktFormat.writeFeature(feature, {
-      featureProjection: 'EPSG:3857',
-      dataProjection: 'EPSG:4326',
-    })
-
-    const token = localStorage.getItem('token')
-
-    const response = await fetch(`${API_URL}/inventory-count`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({
-        wkt,
-        name: '',
-        color: '',
-      }),
-    })
-
-    if (response.status === 401) {
-      onLogout()
-      return null
-    }
-
-    if (!response.ok) {
-      throw new Error('Envanter analizi başarısız.')
-    }
-
-    const data = await response.json()
-    return data.count
-  }
-
-  const savePendingGeometry = async () => {
-    if (!pendingFeature || !pendingType) return
-
-    if (!geometryName.trim()) {
-      setMessage('İsim alanı boş bırakılamaz.')
-      return
-    }
-
-    setSaving(true)
-    setMessage('')
-
-    try {
-      const wktFormat = new WKT()
-
-      const wkt = wktFormat.writeFeature(pendingFeature, {
-        featureProjection: 'EPSG:3857',
-        dataProjection: 'EPSG:4326',
+        type:
+          geometryType,
       })
 
-      const token = localStorage.getItem('token')
+    drawRef.current =
+      draw
 
-      const response = await fetch(`${API_URL}/${pendingType}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          wkt,
-          name: geometryName.trim(),
-          color: geometryColor,
-        }),
-      })
+    map.addInteraction(
+      draw
+    )
 
-      if (response.status === 401) {
+    draw.on(
+      'drawend',
+      (event) => {
+        setPendingFeature(
+          event.feature
+        )
+
+        setPendingType(
+          type
+        )
+
+        setGeometryName('')
+        setGeometryColor(
+          '#ff1744'
+        )
+
+        setPopupVisible(
+          true
+        )
+
+        setTimeout(() => {
+          removeCurrentDrawInteraction()
+
+          setSelectedType(
+            null
+          )
+        }, 0)
+      }
+    )
+  }
+
+  const getInventoryCount =
+    async (feature) => {
+      const wktFormat =
+        new WKT()
+
+      const wkt =
+        wktFormat.writeFeature(
+          feature,
+          {
+            featureProjection:
+              'EPSG:3857',
+
+            dataProjection:
+              'EPSG:4326',
+          }
+        )
+
+      const token =
+        localStorage.getItem(
+          'token'
+        )
+
+      const response =
+        await fetch(
+          `${API_URL}/inventory-count`,
+          {
+            method: 'POST',
+
+            headers: {
+              'Content-Type':
+                'application/json',
+
+              Authorization:
+                `Bearer ${token}`,
+            },
+
+            body:
+              JSON.stringify({
+                wkt,
+                name: '',
+                color: '',
+              }),
+          }
+        )
+
+      if (
+        response.status === 401
+      ) {
         onLogout()
+        return null
+      }
+
+      if (!response.ok) {
+        throw new Error(
+          'Envanter analizi başarısız.'
+        )
+      }
+
+      const data =
+        await response.json()
+
+      return data.count
+    }
+
+  const savePendingGeometry =
+    async () => {
+      if (
+        !pendingFeature ||
+        !pendingType
+      ) {
         return
       }
 
-      const data = await response.json()
+      if (
+        !geometryName.trim()
+      ) {
+        setMessage(
+          'İsim alanı boş bırakılamaz.'
+        )
 
-      if (!response.ok) {
-        throw new Error(data.message || 'Kayıt başarısız.')
+        return
       }
 
-      pendingFeature.set('id', data.id)
-      pendingFeature.set('type', pendingType)
-      pendingFeature.set('name', geometryName.trim())
-      pendingFeature.set('color', geometryColor)
-      pendingFeature.changed()
+      setSaving(true)
+      setMessage('')
 
-      if (pendingType === 'point') {
-        setMessage('Nokta başarıyla kaydedildi.')
-      } else if (pendingType === 'line') {
-        setMessage('Çizgi başarıyla kaydedildi.')
-      } else if (pendingType === 'polygon') {
-        try {
-          const count = await getInventoryCount(pendingFeature)
+      try {
+        const wktFormat =
+          new WKT()
 
-          if (count !== null) {
-            setMessage(`Poligon kaydedildi. ${count} envanter ile kesişiyor.`)
-          }
-        } catch (analysisError) {
-          console.error(analysisError)
-          setMessage('Poligon kaydedildi fakat envanter analizi yapılamadı.')
+        const wkt =
+          wktFormat.writeFeature(
+            pendingFeature,
+            {
+              featureProjection:
+                'EPSG:3857',
+
+              dataProjection:
+                'EPSG:4326',
+            }
+          )
+
+        const token =
+          localStorage.getItem(
+            'token'
+          )
+
+        const response =
+          await fetch(
+            `${API_URL}/${pendingType}`,
+            {
+              method: 'POST',
+
+              headers: {
+                'Content-Type':
+                  'application/json',
+
+                Authorization:
+                  `Bearer ${token}`,
+              },
+
+              body:
+                JSON.stringify({
+                  wkt,
+
+                  name:
+                    geometryName.trim(),
+
+                  color:
+                    geometryColor,
+                }),
+            }
+          )
+
+        if (
+          response.status === 401
+        ) {
+          onLogout()
+          return
         }
-      }
 
-      setPopupVisible(false)
-      setPendingFeature(null)
-      setPendingType(null)
-      setGeometryName('')
-      setGeometryColor('#ff1744')
-    } catch (error) {
-      console.error(error)
-      setMessage(error.message || 'Çizim veritabanına kaydedilemedi.')
-    } finally {
-      setSaving(false)
+        const data =
+          await response.json()
+
+        if (!response.ok) {
+          throw new Error(
+            data.message ||
+              'Kayıt başarısız.'
+          )
+        }
+
+        pendingFeature.set(
+          'id',
+          data.id
+        )
+
+        pendingFeature.set(
+          'type',
+          pendingType
+        )
+
+        pendingFeature.set(
+          'name',
+          geometryName.trim()
+        )
+
+        pendingFeature.set(
+          'color',
+          geometryColor
+        )
+
+        pendingFeature.changed()
+
+        if (
+          pendingType === 'point'
+        ) {
+          setMessage(
+            'Nokta başarıyla kaydedildi.'
+          )
+        } else if (
+          pendingType === 'line'
+        ) {
+          setMessage(
+            'Çizgi başarıyla kaydedildi.'
+          )
+        } else if (
+          pendingType ===
+          'polygon'
+        ) {
+          try {
+            const count =
+              await getInventoryCount(
+                pendingFeature
+              )
+
+            if (
+              count !== null
+            ) {
+              setMessage(
+                `Poligon kaydedildi. ${count} envanter ile kesişiyor.`
+              )
+            }
+          } catch (
+            analysisError
+          ) {
+            console.error(
+              analysisError
+            )
+
+            setMessage(
+              'Poligon kaydedildi fakat envanter analizi yapılamadı.'
+            )
+          }
+        }
+
+        setPopupVisible(
+          false
+        )
+
+        setPendingFeature(
+          null
+        )
+
+        setPendingType(
+          null
+        )
+
+        setGeometryName('')
+        setGeometryColor(
+          '#ff1744'
+        )
+      } catch (error) {
+        console.error(error)
+
+        setMessage(
+          error.message ||
+            'Çizim veritabanına kaydedilemedi.'
+        )
+      } finally {
+        setSaving(false)
+      }
     }
-  }
 
   const cancelPopup = () => {
-    if (pendingFeature && vectorSourceRef.current) {
-      vectorSourceRef.current.removeFeature(pendingFeature)
+    if (
+      pendingFeature &&
+      vectorSourceRef.current
+    ) {
+      vectorSourceRef.current
+        .removeFeature(
+          pendingFeature
+        )
     }
 
     setPopupVisible(false)
     setPendingFeature(null)
     setPendingType(null)
     setGeometryName('')
-    setGeometryColor('#ff1744')
+    setGeometryColor(
+      '#ff1744'
+    )
     setMessage('')
   }
 
-  const startInventoryAnalysis = () => {
-    const map = mapRef.current
-    const analysisSource = analysisSourceRef.current
+  const startInventoryAnalysis =
+    () => {
+      const map =
+        mapRef.current
 
-    if (!map || !analysisSource) return
+      const analysisSource =
+        analysisSourceRef.current
 
-    removeCurrentDrawInteraction()
-    removeModifyInteraction()
-    analysisSource.clear()
-
-    setSelectedType('analysis')
-    setMessage('Analiz poligonunu çizin.')
-
-    const draw = new Draw({
-      source: analysisSource,
-      type: 'Polygon',
-    })
-
-    drawRef.current = draw
-    map.addInteraction(draw)
-
-    draw.on('drawend', async (event) => {
-      try {
-        const count = await getInventoryCount(event.feature)
-
-        if (count !== null) {
-          setMessage(`Envanter Analizi: ${count} envanter ile kesişiyor.`)
-        }
-      } catch (error) {
-        console.error(error)
-        setMessage('Envanter analizi yapılamadı.')
+      if (
+        !map ||
+        !analysisSource
+      ) {
+        return
       }
 
       removeCurrentDrawInteraction()
+      removeModifyInteraction()
+
+      analysisSource.clear()
+
+      setSelectedType(
+        'analysis'
+      )
+
+      setMessage(
+        'Analiz poligonunu çizin.'
+      )
+
+      const draw =
+        new Draw({
+          source:
+            analysisSource,
+
+          type:
+            'Polygon',
+        })
+
+      drawRef.current =
+        draw
+
+      map.addInteraction(
+        draw
+      )
+
+      draw.on(
+        'drawend',
+        async (event) => {
+          try {
+            const count =
+              await getInventoryCount(
+                event.feature
+              )
+
+            if (
+              count !== null
+            ) {
+              setMessage(
+                `Envanter Analizi: ${count} envanter ile kesişiyor.`
+              )
+            }
+          } catch (error) {
+            console.error(error)
+
+            setMessage(
+              'Envanter analizi yapılamadı.'
+            )
+          }
+
+          removeCurrentDrawInteraction()
+
+          setSelectedType(
+            null
+          )
+        }
+      )
+    }
+
+  const clearInventoryAnalysis =
+    () => {
+      removeCurrentDrawInteraction()
+
+      if (
+        analysisSourceRef.current
+      ) {
+        analysisSourceRef.current
+          .clear()
+      }
+
       setSelectedType(null)
-    })
-  }
 
-  const clearInventoryAnalysis = () => {
-    removeCurrentDrawInteraction()
+      setMessage(
+        'Analiz poligonu temizlendi.'
+      )
+    }
 
-    if (analysisSourceRef.current) {
-      analysisSourceRef.current.clear()
+  const stopDrawing = () => {
+    if (
+      drawRef.current &&
+      mapRef.current
+    ) {
+      mapRef.current
+        .removeInteraction(
+          drawRef.current
+        )
+
+      drawRef.current =
+        null
     }
 
     setSelectedType(null)
-    setMessage('Analiz poligonu temizlendi.')
+
+    setMessage(
+      'Çizim modu durduruldu.'
+    )
   }
 
-  const stopDrawing = () => {
-    removeCurrentDrawInteraction()
-    removeModifyInteraction()
-    setSelectedType(null)
-    setMessage('')
-  }
+  const startGeometryEdit =
+    () => {
+      const map =
+        mapRef.current
 
-  const startGeometryEdit = () => {
-    const map = mapRef.current
+      if (
+        !map ||
+        !selectedFeature
+      ) {
+        return
+      }
 
-    if (!map || !selectedFeature) return
+      removeCurrentDrawInteraction()
+      removeModifyInteraction()
 
-    removeCurrentDrawInteraction()
-    removeModifyInteraction()
+      const modify =
+        new Modify({
+          features:
+            new Collection([
+              selectedFeature,
+            ]),
+        })
 
-    const modify = new Modify({
-      features: new Collection([selectedFeature]),
-    })
+      modifyRef.current =
+        modify
 
-    modifyRef.current = modify
-    map.addInteraction(modify)
+      map.addInteraction(
+        modify
+      )
 
-    setGeometryEditing(true)
-    setMessage('Haritadaki obje üzerinde nokta veya köşeleri sürükleyebilirsin.')
-  }
+      setGeometryEditing(
+        true
+      )
+
+      setMessage(
+        'Haritadaki obje üzerinde nokta veya köşeleri sürükleyebilirsin.'
+      )
+    }
 
   const cancelDetail = () => {
-    if (selectedFeature && originalGeometryRef.current) {
-      selectedFeature.setGeometry(originalGeometryRef.current.clone())
+    if (
+      selectedFeature &&
+      originalGeometryRef.current
+    ) {
+      selectedFeature.setGeometry(
+        originalGeometryRef.current
+          .clone()
+      )
+
       selectedFeature.changed()
     }
 
     removeModifyInteraction()
-    originalGeometryRef.current = null
+
+    originalGeometryRef.current =
+      null
+
     setSelectedFeature(null)
     setDetailVisible(false)
     setDetailName('')
-    setDetailColor('#ff1744')
-    setMessage('')
-  }
-
-  const saveDetail = async () => {
-    if (!selectedFeature) return
-
-    if (!detailName.trim()) {
-      setMessage('İsim alanı boş bırakılamaz.')
-      return
-    }
-
-    setDetailSaving(true)
-    setMessage('')
-
-    try {
-      const id = selectedFeature.get('id')
-      const type = selectedFeature.get('type')
-      const token = localStorage.getItem('token')
-      const wktFormat = new WKT()
-
-      const wkt = wktFormat.writeFeature(selectedFeature, {
-        featureProjection: 'EPSG:3857',
-        dataProjection: 'EPSG:4326',
-      })
-
-      const response = await fetch(`${API_URL}/${type}/${id}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          wkt,
-          name: detailName.trim(),
-          color: detailColor,
-        }),
-      })
-
-      if (response.status === 401) {
-        onLogout()
-        return
-      }
-
-      const data = await response.json()
-
-      if (!response.ok) {
-        throw new Error(data.message || 'Güncelleme başarısız.')
-      }
-
-      selectedFeature.set('name', detailName.trim())
-      selectedFeature.set('color', detailColor)
-      selectedFeature.changed()
-
-      removeModifyInteraction()
-      originalGeometryRef.current = null
-      setSelectedFeature(null)
-      setDetailVisible(false)
-      setMessage('Obje başarıyla güncellendi.')
-    } catch (error) {
-      console.error(error)
-      setMessage(error.message || 'Obje güncellenemedi.')
-    } finally {
-      setDetailSaving(false)
-    }
-  }
-
-  const deleteSelectedFeature = async () => {
-    if (!selectedFeature) return
-
-    const confirmed = window.confirm(
-      'Bu objeyi silmek istediğine emin misin? Kayıt veritabanından tamamen silinmeyecek.'
+    setDetailColor(
+      '#ff1744'
     )
-
-    if (!confirmed) return
-
-    setDetailSaving(true)
     setMessage('')
+  }
 
-    try {
-      const id = selectedFeature.get('id')
-      const type = selectedFeature.get('type')
-      const token = localStorage.getItem('token')
-
-      const response = await fetch(`${API_URL}/${type}/${id}`, {
-        method: 'DELETE',
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      })
-
-      if (response.status === 401) {
-        onLogout()
+  const saveDetail =
+    async () => {
+      if (!selectedFeature) {
         return
       }
 
-      const data = await response.json()
+      if (
+        !detailName.trim()
+      ) {
+        setMessage(
+          'İsim alanı boş bırakılamaz.'
+        )
 
-      if (!response.ok) {
-        throw new Error(data.message || 'Silme işlemi başarısız.')
+        return
       }
 
-      removeModifyInteraction()
+      setDetailSaving(true)
+      setMessage('')
 
-      if (vectorSourceRef.current) {
-        vectorSourceRef.current.removeFeature(selectedFeature)
+      try {
+        const id =
+          selectedFeature.get(
+            'id'
+          )
+
+        const type =
+          selectedFeature.get(
+            'type'
+          )
+
+        const token =
+          localStorage.getItem(
+            'token'
+          )
+
+        const wktFormat =
+          new WKT()
+
+        const wkt =
+          wktFormat.writeFeature(
+            selectedFeature,
+            {
+              featureProjection:
+                'EPSG:3857',
+
+              dataProjection:
+                'EPSG:4326',
+            }
+          )
+
+        const response =
+          await fetch(
+            `${API_URL}/${type}/${id}`,
+            {
+              method: 'PUT',
+
+              headers: {
+                'Content-Type':
+                  'application/json',
+
+                Authorization:
+                  `Bearer ${token}`,
+              },
+
+              body:
+                JSON.stringify({
+                  wkt,
+
+                  name:
+                    detailName.trim(),
+
+                  color:
+                    detailColor,
+                }),
+            }
+          )
+
+        if (
+          response.status === 401
+        ) {
+          onLogout()
+          return
+        }
+
+        const data =
+          await response.json()
+
+        if (!response.ok) {
+          throw new Error(
+            data.message ||
+              'Güncelleme başarısız.'
+          )
+        }
+
+        selectedFeature.set(
+          'name',
+          detailName.trim()
+        )
+
+        selectedFeature.set(
+          'color',
+          detailColor
+        )
+
+        selectedFeature.changed()
+
+        removeModifyInteraction()
+
+        originalGeometryRef.current =
+          null
+
+        setSelectedFeature(
+          null
+        )
+
+        setDetailVisible(
+          false
+        )
+
+        setMessage(
+          'Obje başarıyla güncellendi.'
+        )
+      } catch (error) {
+        console.error(error)
+
+        setMessage(
+          error.message ||
+            'Obje güncellenemedi.'
+        )
+      } finally {
+        setDetailSaving(false)
       }
-
-      originalGeometryRef.current = null
-      setSelectedFeature(null)
-      setDetailVisible(false)
-      setMessage('Obje başarıyla silindi.')
-    } catch (error) {
-      console.error(error)
-      setMessage(error.message || 'Obje silinemedi.')
-    } finally {
-      setDetailSaving(false)
     }
-  }
+
+  const deleteSelectedFeature =
+    async () => {
+      if (!selectedFeature) {
+        return
+      }
+
+      const confirmed =
+        window.confirm(
+          'Bu objeyi silmek istediğine emin misin? Kayıt veritabanından tamamen silinmeyecek.'
+        )
+
+      if (!confirmed) {
+        return
+      }
+
+      setDetailSaving(true)
+      setMessage('')
+
+      try {
+        const id =
+          selectedFeature.get(
+            'id'
+          )
+
+        const type =
+          selectedFeature.get(
+            'type'
+          )
+
+        const token =
+          localStorage.getItem(
+            'token'
+          )
+
+        const response =
+          await fetch(
+            `${API_URL}/${type}/${id}`,
+            {
+              method:
+                'DELETE',
+
+              headers: {
+                Authorization:
+                  `Bearer ${token}`,
+              },
+            }
+          )
+
+        if (
+          response.status === 401
+        ) {
+          onLogout()
+          return
+        }
+
+        const data =
+          await response.json()
+
+        if (!response.ok) {
+          throw new Error(
+            data.message ||
+              'Silme işlemi başarısız.'
+          )
+        }
+
+        removeModifyInteraction()
+
+        if (
+          vectorSourceRef.current
+        ) {
+          vectorSourceRef.current
+            .removeFeature(
+              selectedFeature
+            )
+        }
+
+        originalGeometryRef.current =
+          null
+
+        setSelectedFeature(
+          null
+        )
+
+        setDetailVisible(
+          false
+        )
+
+        setMessage(
+          'Obje başarıyla silindi.'
+        )
+      } catch (error) {
+        console.error(error)
+
+        setMessage(
+          error.message ||
+            'Obje silinemedi.'
+        )
+      } finally {
+        setDetailSaving(
+          false
+        )
+      }
+    }
 
   const popupFooter = (
     <div className="popup-footer">
@@ -668,9 +1145,15 @@ function MapPage({ onLogout }) {
       />
 
       <Button
-        label={saving ? 'Kaydediliyor...' : 'Kaydet'}
+        label={
+          saving
+            ? 'Kaydediliyor...'
+            : 'Kaydet'
+        }
         icon="pi pi-check"
-        onClick={savePendingGeometry}
+        onClick={
+          savePendingGeometry
+        }
         disabled={saving}
       />
     </div>
@@ -679,30 +1162,60 @@ function MapPage({ onLogout }) {
   const detailFooter = (
     <div
       className="popup-footer"
-      style={{ justifyContent: 'space-between' }}
+      style={{
+        justifyContent:
+          'space-between',
+      }}
     >
       <Button
         label="Sil"
         icon="pi pi-trash"
         severity="danger"
-        onClick={deleteSelectedFeature}
-        disabled={detailSaving}
+        onClick={
+          deleteSelectedFeature
+        }
+        disabled={
+          detailSaving ||
+          !hasPermission(
+            'Obje Silme'
+          )
+        }
       />
 
-      <div style={{ display: 'flex', gap: '10px' }}>
+      <div
+        style={{
+          display: 'flex',
+          gap: '10px',
+        }}
+      >
         <Button
           label="İptal"
           icon="pi pi-times"
           severity="secondary"
-          onClick={cancelDetail}
-          disabled={detailSaving}
+          onClick={
+            cancelDetail
+          }
+          disabled={
+            detailSaving
+          }
         />
 
         <Button
-          label={detailSaving ? 'Kaydediliyor...' : 'Kaydet'}
+          label={
+            detailSaving
+              ? 'Kaydediliyor...'
+              : 'Kaydet'
+          }
           icon="pi pi-check"
-          onClick={saveDetail}
-          disabled={detailSaving}
+          onClick={
+            saveDetail
+          }
+          disabled={
+            detailSaving ||
+            !hasPermission(
+              'Obje Güncelleme'
+            )
+          }
         />
       </div>
     </div>
@@ -711,11 +1224,16 @@ function MapPage({ onLogout }) {
   return (
     <div className="map-page">
       <header>
-        <h2>Türkiye Haritası</h2>
+        <h2>
+          Türkiye Haritası
+        </h2>
 
         <div className="header-actions">
           <div className="session-timer">
-            Oturum Süresi: {formatTime(remainingTime)}
+            Oturum Süresi:{' '}
+            {formatTime(
+              remainingTime
+            )}
           </div>
 
           <Button
@@ -734,43 +1252,111 @@ function MapPage({ onLogout }) {
         <Button
           label="Nokta"
           icon="pi pi-map-marker"
-          className={selectedType === 'point' ? 'drawing-active' : ''}
-          onClick={() => startDrawing('point')}
+          className={
+            selectedType ===
+            'point'
+              ? 'drawing-active'
+              : ''
+          }
+          onClick={() =>
+            startDrawing(
+              'point'
+            )
+          }
+          disabled={
+            !hasPermission(
+              'Point Ekleme'
+            )
+          }
         />
 
         <Button
           label="Çizgi"
           icon="pi pi-minus"
-          className={selectedType === 'line' ? 'drawing-active' : ''}
-          onClick={() => startDrawing('line')}
+          className={
+            selectedType ===
+            'line'
+              ? 'drawing-active'
+              : ''
+          }
+          onClick={() =>
+            startDrawing(
+              'line'
+            )
+          }
+          disabled={
+            !hasPermission(
+              'Line Ekleme'
+            )
+          }
         />
 
         <Button
           label="Poligon"
           icon="pi pi-stop"
-          className={selectedType === 'polygon' ? 'drawing-active' : ''}
-          onClick={() => startDrawing('polygon')}
+          className={
+            selectedType ===
+            'polygon'
+              ? 'drawing-active'
+              : ''
+          }
+          onClick={() =>
+            startDrawing(
+              'polygon'
+            )
+          }
+          disabled={
+            !hasPermission(
+              'Polygon Ekleme'
+            )
+          }
         />
 
         <Button
           label="Envanter Analizi"
           icon="pi pi-search"
-          className={selectedType === 'analysis' ? 'drawing-active' : ''}
-          onClick={startInventoryAnalysis}
+          className={
+            selectedType ===
+            'analysis'
+              ? 'drawing-active'
+              : ''
+          }
+          onClick={
+            startInventoryAnalysis
+          }
+          disabled={
+            !hasPermission(
+              'Envanter Analizi'
+            )
+          }
         />
 
         <Button
           label="Analizi Temizle"
           icon="pi pi-trash"
-          onClick={clearInventoryAnalysis}
+          onClick={
+            clearInventoryAnalysis
+          }
         />
 
         <Button
           label="Durdur"
           icon="pi pi-times"
           className="stop-drawing-button"
-          onClick={stopDrawing}
+          onClick={
+            stopDrawing
+          }
         />
+
+        {isAdmin && (
+          <Button
+            label="Admin Paneli"
+            icon="pi pi-cog"
+            onClick={
+              onOpenAdmin
+            }
+          />
+        )}
       </div>
 
       {message && (
@@ -786,12 +1372,20 @@ function MapPage({ onLogout }) {
 
       <Dialog
         header="Öznitelik Bilgileri"
-        visible={popupVisible}
-        style={{ width: '420px' }}
+        visible={
+          popupVisible
+        }
+        style={{
+          width: '420px',
+        }}
         modal
         closable={!saving}
-        onHide={cancelPopup}
-        footer={popupFooter}
+        onHide={
+          cancelPopup
+        }
+        footer={
+          popupFooter
+        }
       >
         <div className="popup-body">
           <div className="popup-field">
@@ -801,8 +1395,14 @@ function MapPage({ onLogout }) {
 
             <InputText
               id="geometryName"
-              value={geometryName}
-              onChange={(e) => setGeometryName(e.target.value)}
+              value={
+                geometryName
+              }
+              onChange={(e) =>
+                setGeometryName(
+                  e.target.value
+                )
+              }
               placeholder="Örneğin: Ankara Bölgesi"
               autoFocus
             />
@@ -817,8 +1417,14 @@ function MapPage({ onLogout }) {
               <input
                 id="geometryColor"
                 type="color"
-                value={geometryColor}
-                onChange={(e) => setGeometryColor(e.target.value)}
+                value={
+                  geometryColor
+                }
+                onChange={(e) =>
+                  setGeometryColor(
+                    e.target.value
+                  )
+                }
               />
 
               <span>
@@ -831,13 +1437,23 @@ function MapPage({ onLogout }) {
 
       <Dialog
         header="Obje Detayı"
-        visible={detailVisible}
-        style={{ width: '440px' }}
+        visible={
+          detailVisible
+        }
+        style={{
+          width: '440px',
+        }}
         modal={false}
-        closable={!detailSaving}
+        closable={
+          !detailSaving
+        }
         draggable
-        onHide={cancelDetail}
-        footer={detailFooter}
+        onHide={
+          cancelDetail
+        }
+        footer={
+          detailFooter
+        }
       >
         <div className="popup-body">
           <div className="popup-field">
@@ -847,8 +1463,19 @@ function MapPage({ onLogout }) {
 
             <InputText
               id="detailName"
-              value={detailName}
-              onChange={(e) => setDetailName(e.target.value)}
+              value={
+                detailName
+              }
+              onChange={(e) =>
+                setDetailName(
+                  e.target.value
+                )
+              }
+              disabled={
+                !hasPermission(
+                  'Obje Güncelleme'
+                )
+              }
             />
           </div>
 
@@ -861,8 +1488,19 @@ function MapPage({ onLogout }) {
               <input
                 id="detailColor"
                 type="color"
-                value={detailColor}
-                onChange={(e) => setDetailColor(e.target.value)}
+                value={
+                  detailColor
+                }
+                onChange={(e) =>
+                  setDetailColor(
+                    e.target.value
+                  )
+                }
+                disabled={
+                  !hasPermission(
+                    'Obje Güncelleme'
+                  )
+                }
               />
 
               <span>
@@ -877,11 +1515,27 @@ function MapPage({ onLogout }) {
             </label>
 
             <Button
-              label={geometryEditing ? 'Düzenleme Açık' : 'Haritada Geometriyi Düzenle'}
+              label={
+                geometryEditing
+                  ? 'Düzenleme Açık'
+                  : 'Haritada Geometriyi Düzenle'
+              }
               icon="pi pi-pencil"
-              severity={geometryEditing ? 'success' : 'secondary'}
-              onClick={startGeometryEdit}
-              disabled={geometryEditing || detailSaving}
+              severity={
+                geometryEditing
+                  ? 'success'
+                  : 'secondary'
+              }
+              onClick={
+                startGeometryEdit
+              }
+              disabled={
+                geometryEditing ||
+                detailSaving ||
+                !hasPermission(
+                  'Obje Güncelleme'
+                )
+              }
             />
 
             <small>

@@ -12,17 +12,24 @@ namespace backend_new.Controllers
     public class GeometryController : ControllerBase
     {
         private readonly IGeometryService _geometryService;
+        private readonly IAdminService _adminService;
 
         public GeometryController(
-            IGeometryService geometryService)
+            IGeometryService geometryService,
+            IAdminService adminService)
         {
             _geometryService = geometryService;
+            _adminService = adminService;
         }
+
+
+        // =====================================
+        // CURRENT USER
+        // =====================================
 
         private int GetCurrentUserId()
         {
-            var claim =
-                User.FindFirst("user_id");
+            var claim = User.FindFirst("user_id");
 
             if (
                 claim == null ||
@@ -40,6 +47,27 @@ namespace backend_new.Controllers
             return userId;
         }
 
+
+        // =====================================
+        // PERMISSION CONTROL
+        // =====================================
+
+        private async Task<bool> HasPermission(
+            int userId,
+            string permissionName)
+        {
+            return await _adminService
+                .HasPermissionAsync(
+                    userId,
+                    permissionName
+                );
+        }
+
+
+        // =====================================
+        // POINT
+        // =====================================
+
         [HttpPost("point")]
         public async Task<IActionResult> AddPoint(
             GeometryRequest request)
@@ -48,18 +76,37 @@ namespace backend_new.Controllers
             {
                 int userId = GetCurrentUserId();
 
-                int id =
-                    await _geometryService.AddPointAsync(
-                        request.Wkt,
-                        request.Name,
-                        request.Color,
-                        userId
+                if (
+                    !await HasPermission(
+                        userId,
+                        "Point Ekleme"
+                    )
+                )
+                {
+                    return StatusCode(
+                        403,
+                        new
+                        {
+                            message =
+                                "Point ekleme yetkiniz bulunmuyor."
+                        }
                     );
+                }
+
+                int id =
+                    await _geometryService
+                        .AddPointAsync(
+                            request.Wkt,
+                            request.Name,
+                            request.Color,
+                            userId
+                        );
 
                 return Ok(new
                 {
                     id,
-                    message = "Point kaydedildi."
+                    message =
+                        "Point kaydedildi."
                 });
             }
             catch (Exception ex)
@@ -67,6 +114,11 @@ namespace backend_new.Controllers
                 return HandleException(ex);
             }
         }
+
+
+        // =====================================
+        // LINE
+        // =====================================
 
         [HttpPost("line")]
         public async Task<IActionResult> AddLine(
@@ -76,18 +128,37 @@ namespace backend_new.Controllers
             {
                 int userId = GetCurrentUserId();
 
-                int id =
-                    await _geometryService.AddLineAsync(
-                        request.Wkt,
-                        request.Name,
-                        request.Color,
-                        userId
+                if (
+                    !await HasPermission(
+                        userId,
+                        "Line Ekleme"
+                    )
+                )
+                {
+                    return StatusCode(
+                        403,
+                        new
+                        {
+                            message =
+                                "Line ekleme yetkiniz bulunmuyor."
+                        }
                     );
+                }
+
+                int id =
+                    await _geometryService
+                        .AddLineAsync(
+                            request.Wkt,
+                            request.Name,
+                            request.Color,
+                            userId
+                        );
 
                 return Ok(new
                 {
                     id,
-                    message = "Line kaydedildi."
+                    message =
+                        "Line kaydedildi."
                 });
             }
             catch (Exception ex)
@@ -95,6 +166,11 @@ namespace backend_new.Controllers
                 return HandleException(ex);
             }
         }
+
+
+        // =====================================
+        // POLYGON
+        // =====================================
 
         [HttpPost("polygon")]
         public async Task<IActionResult> AddPolygon(
@@ -104,18 +180,37 @@ namespace backend_new.Controllers
             {
                 int userId = GetCurrentUserId();
 
-                int id =
-                    await _geometryService.AddPolygonAsync(
-                        request.Wkt,
-                        request.Name,
-                        request.Color,
-                        userId
+                if (
+                    !await HasPermission(
+                        userId,
+                        "Polygon Ekleme"
+                    )
+                )
+                {
+                    return StatusCode(
+                        403,
+                        new
+                        {
+                            message =
+                                "Polygon ekleme yetkiniz bulunmuyor."
+                        }
                     );
+                }
+
+                int id =
+                    await _geometryService
+                        .AddPolygonAsync(
+                            request.Wkt,
+                            request.Name,
+                            request.Color,
+                            userId
+                        );
 
                 return Ok(new
                 {
                     id,
-                    message = "Polygon kaydedildi."
+                    message =
+                        "Polygon kaydedildi."
                 });
             }
             catch (Exception ex)
@@ -123,6 +218,11 @@ namespace backend_new.Controllers
                 return HandleException(ex);
             }
         }
+
+
+        // =====================================
+        // GET USER GEOMETRIES
+        // =====================================
 
         [HttpGet("all")]
         public async Task<IActionResult> GetAll()
@@ -132,19 +232,16 @@ namespace backend_new.Controllers
                 int userId = GetCurrentUserId();
 
                 var points =
-                    await _geometryService.GetPointsAsync(
-                        userId
-                    );
+                    await _geometryService
+                        .GetPointsAsync(userId);
 
                 var lines =
-                    await _geometryService.GetLinesAsync(
-                        userId
-                    );
+                    await _geometryService
+                        .GetLinesAsync(userId);
 
                 var polygons =
-                    await _geometryService.GetPolygonsAsync(
-                        userId
-                    );
+                    await _geometryService
+                        .GetPolygonsAsync(userId);
 
                 return Ok(new
                 {
@@ -159,6 +256,11 @@ namespace backend_new.Controllers
             }
         }
 
+
+        // =====================================
+        // INVENTORY ANALYSIS
+        // =====================================
+
         [HttpPost("inventory-count")]
         public async Task<IActionResult>
             GetInventoryCount(
@@ -166,6 +268,25 @@ namespace backend_new.Controllers
         {
             try
             {
+                int userId = GetCurrentUserId();
+
+                if (
+                    !await HasPermission(
+                        userId,
+                        "Envanter Analizi"
+                    )
+                )
+                {
+                    return StatusCode(
+                        403,
+                        new
+                        {
+                            message =
+                                "Envanter analizi yetkiniz bulunmuyor."
+                        }
+                    );
+                }
+
                 var count =
                     await _geometryService
                         .GetIntersectingInventoryCountAsync(
@@ -183,6 +304,11 @@ namespace backend_new.Controllers
             }
         }
 
+
+        // =====================================
+        // UPDATE
+        // =====================================
+
         [HttpPut("{type}/{id:int}")]
         public async Task<IActionResult> Update(
             string type,
@@ -192,6 +318,23 @@ namespace backend_new.Controllers
             try
             {
                 int userId = GetCurrentUserId();
+
+                if (
+                    !await HasPermission(
+                        userId,
+                        "Obje Güncelleme"
+                    )
+                )
+                {
+                    return StatusCode(
+                        403,
+                        new
+                        {
+                            message =
+                                "Obje güncelleme yetkiniz bulunmuyor."
+                        }
+                    );
+                }
 
                 bool updated =
                     await _geometryService
@@ -225,6 +368,11 @@ namespace backend_new.Controllers
             }
         }
 
+
+        // =====================================
+        // SOFT DELETE
+        // =====================================
+
         [HttpDelete("{type}/{id:int}")]
         public async Task<IActionResult> Delete(
             string type,
@@ -233,6 +381,23 @@ namespace backend_new.Controllers
             try
             {
                 int userId = GetCurrentUserId();
+
+                if (
+                    !await HasPermission(
+                        userId,
+                        "Obje Silme"
+                    )
+                )
+                {
+                    return StatusCode(
+                        403,
+                        new
+                        {
+                            message =
+                                "Obje silme yetkiniz bulunmuyor."
+                        }
+                    );
+                }
 
                 bool deleted =
                     await _geometryService
@@ -263,6 +428,11 @@ namespace backend_new.Controllers
             }
         }
 
+
+        // =====================================
+        // ERROR HANDLING
+        // =====================================
+
         private IActionResult HandleException(
             Exception ex)
         {
@@ -290,7 +460,9 @@ namespace backend_new.Controllers
                 {
                     message =
                         "İşlem sırasında beklenmeyen bir hata oluştu.",
-                    detail = ex.Message
+
+                    detail =
+                        ex.Message
                 }
             );
         }
