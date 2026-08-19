@@ -10,6 +10,7 @@ import Draw from 'ol/interaction/Draw.js'
 import Modify from 'ol/interaction/Modify.js'
 import Collection from 'ol/Collection.js'
 import WKT from 'ol/format/WKT.js'
+import GeoJSON from 'ol/format/GeoJSON.js'
 import { fromLonLat } from 'ol/proj.js'
 
 import Style from 'ol/style/Style.js'
@@ -25,6 +26,7 @@ import 'ol/ol.css'
 
 const API_URL = 'http://localhost:5092/api/geometry'
 const AUTH_URL = 'http://localhost:5092/api/authorization'
+const GEOSERVER_API_URL = 'http://localhost:5092/api/geoserver'
 
 function MapPage({ token, onLogout, onOpenAdmin }) {
   const mapElementRef = useRef(null)
@@ -172,48 +174,135 @@ function MapPage({ token, onLogout, onOpenAdmin }) {
 
     const loadSavedGeometries = async () => {
       try {
-        const token = localStorage.getItem('token')
+        const currentToken = localStorage.getItem('token') || token
 
-        const response = await fetch(`${API_URL}/all`, {
-          method: 'GET',
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        })
-
-        if (response.status === 401) {
+        if (!currentToken) {
           onLogout()
           return
         }
 
-        if (!response.ok) {
-          throw new Error('Kayıtlı çizimler getirilemedi.')
+        const payloadPart = currentToken.split('.')[1]
+
+        if (!payloadPart) {
+          throw new Error('Geçersiz oturum anahtarı.')
         }
 
-        const data = await response.json()
-        const wktFormat = new WKT()
+        const normalizedPayload = payloadPart
+          .replace(/-/g, '+')
+          .replace(/_/g, '/')
 
-        const addGeometry = (item, type) => {
-          const feature = wktFormat.readFeature(item.wkt, {
+        const paddedPayload = normalizedPayload.padEnd(
+          Math.ceil(normalizedPayload.length / 4) * 4,
+          '='
+        )
+
+        const payload = JSON.parse(atob(paddedPayload))
+
+        const userId =
+          payload.userId ??
+          payload.user_id ??
+          payload.id ??
+          payload.nameid ??
+          payload.sub ??
+          payload[
+            'http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier'
+          ]
+
+        if (!userId) {
+          throw new Error(
+            'Token içerisinden kullanıcı ID bulunamadı.'
+          )
+        }
+
+        const headers = {
+          Authorization: `Bearer ${currentToken}`,
+        }
+
+        const [
+          pointsResponse,
+          linesResponse,
+          polygonsResponse,
+        ] = await Promise.all([
+          fetch(
+            `${GEOSERVER_API_URL}/points?userId=${encodeURIComponent(userId)}`,
+            { method: 'GET', headers }
+          ),
+          fetch(
+            `${GEOSERVER_API_URL}/lines?userId=${encodeURIComponent(userId)}`,
+            { method: 'GET', headers }
+          ),
+          fetch(
+            `${GEOSERVER_API_URL}/polygons?userId=${encodeURIComponent(userId)}`,
+            { method: 'GET', headers }
+          ),
+        ])
+
+        if (
+          pointsResponse.status === 401 ||
+          linesResponse.status === 401 ||
+          polygonsResponse.status === 401
+        ) {
+          onLogout()
+          return
+        }
+
+        if (
+          !pointsResponse.ok ||
+          !linesResponse.ok ||
+          !polygonsResponse.ok
+        ) {
+          throw new Error(
+            'GeoServer üzerinden çizimler getirilemedi.'
+          )
+        }
+
+        const [pointsData, linesData, polygonsData] =
+          await Promise.all([
+            pointsResponse.json(),
+            linesResponse.json(),
+            polygonsResponse.json(),
+          ])
+
+        const geoJsonFormat = new GeoJSON()
+
+        const addFeatures = (data, type) => {
+          const features = geoJsonFormat.readFeatures(data, {
             dataProjection: 'EPSG:4326',
             featureProjection: 'EPSG:3857',
           })
 
-          feature.set('id', item.id)
-          feature.set('type', type)
-          feature.set('name', item.name)
-          feature.set('color', item.color || '#ff1744')
+          features.forEach((feature) => {
+            const rawId = feature.getId()
+            const numericId = Number(
+              String(rawId ?? '')
+                .split('.')
+                .pop()
+            )
 
-          vectorSource.addFeature(feature)
+            if (Number.isFinite(numericId)) {
+              feature.set('id', numericId)
+            }
+
+            feature.set('type', type)
+            feature.set('name', feature.get('name') || '')
+            feature.set(
+              'color',
+              feature.get('color') || '#ff1744'
+            )
+
+            vectorSource.addFeature(feature)
+          })
         }
 
-        data.points.forEach((item) => addGeometry(item, 'point'))
-        data.lines.forEach((item) => addGeometry(item, 'line'))
-        data.polygons.forEach((item) => addGeometry(item, 'polygon'))
+        vectorSource.clear()
+
+        addFeatures(pointsData, 'point')
+        addFeatures(linesData, 'line')
+        addFeatures(polygonsData, 'polygon')
       } catch (error) {
         console.error(error)
         setMessage(
-          'Kayıtlı çizimler yüklenemedi. Backend çalışıyor mu kontrol et.'
+          'Kayıtlı çizimler GeoServer üzerinden yüklenemedi.'
         )
       }
     }

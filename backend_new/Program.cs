@@ -131,6 +131,8 @@ builder.Services.AddAuthorization();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddScoped<IPasswordService, PasswordService>();
 builder.Services.AddSwaggerGen();
+builder.Services.AddHttpClient<GeoServerService>();
+
 
 var app = builder.Build();
 
