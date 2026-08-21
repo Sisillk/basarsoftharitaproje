@@ -6,6 +6,7 @@ import TileLayer from 'ol/layer/Tile.js'
 import VectorLayer from 'ol/layer/Vector.js'
 import OSM from 'ol/source/OSM.js'
 import VectorSource from 'ol/source/Vector.js'
+import TileWMS from 'ol/source/TileWMS.js'
 import Draw from 'ol/interaction/Draw.js'
 import Modify from 'ol/interaction/Modify.js'
 import Collection from 'ol/Collection.js'
@@ -21,12 +22,71 @@ import CircleStyle from 'ol/style/Circle.js'
 import { Button } from 'primereact/button'
 import { Dialog } from 'primereact/dialog'
 import { InputText } from 'primereact/inputtext'
+import { Toast } from 'primereact/toast'
 
 import 'ol/ol.css'
 
 const API_URL = 'http://localhost:5092/api/geometry'
 const AUTH_URL = 'http://localhost:5092/api/authorization'
-const GEOSERVER_API_URL = 'http://localhost:5092/api/geoserver'
+
+const GEOSERVER_WMS_URL =
+  'http://localhost:8080/geoserver/basarsoft/wms'
+
+const GEOSERVER_API_URL =
+  'http://localhost:5092/api/geoserver'
+
+
+const getUserIdFromToken = (jwtToken) => {
+  try {
+    if (!jwtToken) return null
+
+    const payloadPart =
+      jwtToken.split('.')[1]
+
+    if (!payloadPart) return null
+
+    const normalized =
+      payloadPart
+        .replace(/-/g, '+')
+        .replace(/_/g, '/')
+
+    const padded =
+      normalized.padEnd(
+        normalized.length +
+          ((4 - normalized.length % 4) % 4),
+        '='
+      )
+
+    const payload =
+      JSON.parse(
+        atob(padded)
+      )
+
+    const rawUserId =
+      payload.sub ??
+      payload.nameid ??
+      payload.userId ??
+      payload.user_id ??
+      payload[
+        'http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier'
+      ]
+
+    const parsed =
+      Number(rawUserId)
+
+    return Number.isFinite(parsed)
+      ? parsed
+      : null
+  } catch (error) {
+    console.error(
+      'JWT kullanıcı id okunamadı:',
+      error
+    )
+
+    return null
+  }
+}
+
 
 function MapPage({ token, onLogout, onOpenAdmin }) {
   const mapElementRef = useRef(null)
@@ -36,8 +96,25 @@ function MapPage({ token, onLogout, onOpenAdmin }) {
   const drawRef = useRef(null)
   const modifyRef = useRef(null)
   const originalGeometryRef = useRef(null)
+  const toastRef = useRef(null)
+  const vectorLayerRef = useRef(null)
+
+  const wmsLayerRefs = useRef({
+    point: null,
+    line: null,
+    polygon: null,
+  })
+
+  const heatmapLayerRef = useRef(null)
+
+  const layerVisibilityRef = useRef({
+    point: true,
+    line: true,
+    polygon: true,
+  })
 
   const [selectedType, setSelectedType] = useState(null)
+  const [drawingToolsOpen, setDrawingToolsOpen] = useState(true)
   const [message, setMessage] = useState('')
   const [remainingTime, setRemainingTime] = useState(0)
 
@@ -58,9 +135,278 @@ function MapPage({ token, onLogout, onOpenAdmin }) {
   const [permissionNames, setPermissionNames] = useState([])
   const [isAdmin, setIsAdmin] = useState(false)
 
+  const [currentUserId, setCurrentUserId] =
+    useState(() =>
+      getUserIdFromToken(
+        token ||
+        localStorage.getItem('token')
+      )
+    )
+
+  const [layerVisibility, setLayerVisibility] = useState({
+    point: true,
+    line: true,
+    polygon: true,
+  })
+
+  const [layerDialogVisible, setLayerDialogVisible] =
+    useState(false)
+
+  const [geometryCounts, setGeometryCounts] = useState({
+    point: 0,
+    line: 0,
+    polygon: 0,
+  })
+
+  const [heatmapVisible, setHeatmapVisible] =
+    useState(false)
+
   const hasPermission = (permissionName) => {
     return permissionNames.includes(permissionName)
   }
+
+  const showToast = (
+    severity,
+    summary,
+    detail
+  ) => {
+    toastRef.current?.show({
+      severity,
+      summary,
+      detail,
+      life: 3000,
+    })
+  }
+
+  const refreshGeometryCounts = () => {
+    const source =
+      vectorSourceRef.current
+
+    if (!source) {
+      setGeometryCounts({
+        point: 0,
+        line: 0,
+        polygon: 0,
+      })
+
+      return
+    }
+
+    const nextCounts = {
+      point: 0,
+      line: 0,
+      polygon: 0,
+    }
+
+    source
+      .getFeatures()
+      .forEach((feature) => {
+        const id =
+          feature.get('id')
+
+        const type =
+          feature.get('type')
+
+        if (!id || !type) {
+          return
+        }
+
+        if (
+          Object.prototype.hasOwnProperty.call(
+            nextCounts,
+            type
+          )
+        ) {
+          nextCounts[type] += 1
+        }
+      })
+
+    setGeometryCounts(
+      nextCounts
+    )
+  }
+
+
+  const toggleLayerVisibility =
+    (type) => {
+      setLayerVisibility(
+        (previous) => {
+          const next = {
+            ...previous,
+            [type]:
+              !previous[type],
+          }
+
+          layerVisibilityRef.current =
+            next
+
+          wmsLayerRefs.current[
+            type
+          ]?.setVisible(
+            next[type]
+          )
+
+          vectorLayerRef.current
+            ?.changed()
+
+          return next
+        }
+      )
+    }
+
+
+  const refreshWmsLayers = () => {
+    const cacheBuster =
+      Date.now()
+
+    Object.values(
+      wmsLayerRefs.current
+    ).forEach((layer) => {
+      const source =
+        layer?.getSource()
+
+      if (!source) {
+        return
+      }
+
+      source.updateParams({
+        _v: cacheBuster,
+      })
+
+      source.refresh()
+    })
+
+    const heatmapSource =
+      heatmapLayerRef.current
+        ?.getSource()
+
+    if (heatmapSource) {
+      heatmapSource.updateParams({
+        _v: cacheBuster,
+      })
+
+      heatmapSource.refresh()
+    }
+  }
+
+
+  const toggleHeatmap = () => {
+    const layer =
+      heatmapLayerRef.current
+
+    if (!layer) {
+      return
+    }
+
+    setHeatmapVisible(
+      previous => {
+        const next =
+          !previous
+
+        layer.setVisible(
+          next
+        )
+
+        if (next) {
+          const source =
+            layer.getSource()
+
+          source?.updateParams({
+            _v: Date.now(),
+          })
+
+          source?.refresh()
+
+          showToast(
+            'info',
+            'Isı Haritası',
+            'Isı haritası analizi açıldı.'
+          )
+        } else {
+          showToast(
+            'info',
+            'Isı Haritası',
+            'Isı haritası analizi kapatıldı.'
+          )
+        }
+
+        return next
+      }
+    )
+  }
+
+
+  const showAllLayers = () => {
+    const next = {
+      point: true,
+      line: true,
+      polygon: true,
+    }
+
+    layerVisibilityRef.current =
+      next
+
+    setLayerVisibility(
+      next
+    )
+
+    Object.values(
+      wmsLayerRefs.current
+    ).forEach((layer) => {
+      layer?.setVisible(true)
+    })
+
+    vectorLayerRef.current
+      ?.changed()
+
+    showToast(
+      'success',
+      'Katmanlar',
+      'Tüm katmanlar görünür yapıldı.'
+    )
+  }
+
+
+  const undoLastDrawPoint = () => {
+    const draw =
+      drawRef.current
+
+    if (!draw) {
+      showToast(
+        'info',
+        'Geri Al',
+        'Şu anda aktif bir çizim yok.'
+      )
+
+      return
+    }
+
+    if (
+      selectedType === 'point'
+    ) {
+      showToast(
+        'info',
+        'Geri Al',
+        'Nokta çiziminde geri alınacak köşe bulunmuyor.'
+      )
+
+      return
+    }
+
+    if (
+      typeof draw.removeLastPoint ===
+      'function'
+    ) {
+      draw.removeLastPoint()
+
+      showToast(
+        'info',
+        'Geri Al',
+        'Son çizim noktası geri alındı.'
+      )
+    }
+  }
+
 
   const createGeometryStyle = (feature) => {
     const geometry = feature.getGeometry()
@@ -70,11 +416,52 @@ function MapPage({ token, onLogout, onOpenAdmin }) {
     const type = geometry.getType()
     const color = feature.get('color') || '#ff1744'
 
+    const interactionOnly =
+      Boolean(
+        feature.get('id')
+      ) &&
+      feature.get(
+        'interactionVisible'
+      ) !== true
+
+    const savedType =
+      feature.get('type')
+
+    const visibilityKey =
+      savedType ||
+      (
+        type === 'Point'
+          ? 'point'
+          : type === 'LineString'
+            ? 'line'
+            : type === 'Polygon'
+              ? 'polygon'
+              : null
+      )
+
+    if (
+      visibilityKey &&
+      layerVisibilityRef.current[
+        visibilityKey
+      ] === false
+    ) {
+      return null
+    }
+
+    // WFS feature'ları normal görünümde sadece etkileşim verisi olarak tutulur.
+    // Görsel gösterimi WMS yapar. Düzenleme açıldığında interactionVisible=true olur
+    // ve feature tekrar görünür hale gelir.
+    if (interactionOnly) {
+      return null
+    }
+
     if (type === 'Point') {
       return new Style({
         image: new CircleStyle({
           radius: 8,
-          fill: new Fill({ color }),
+          fill: new Fill({
+            color,
+          }),
           stroke: new Stroke({
             color: '#ffffff',
             width: 2,
@@ -139,228 +526,600 @@ function MapPage({ token, onLogout, onOpenAdmin }) {
   }
 
   useEffect(() => {
-    const vectorSource = new VectorSource()
-    const analysisSource = new VectorSource()
+    if (!currentUserId) {
+      return
+    }
 
-    vectorSourceRef.current = vectorSource
-    analysisSourceRef.current = analysisSource
+    const vectorSource =
+      new VectorSource()
 
-    const vectorLayer = new VectorLayer({
-      source: vectorSource,
-      style: createGeometryStyle,
-    })
+    const analysisSource =
+      new VectorSource()
 
-    const analysisLayer = new VectorLayer({
-      source: analysisSource,
-      style: analysisStyle,
-    })
+    vectorSourceRef.current =
+      vectorSource
 
-    const map = new Map({
-      target: mapElementRef.current,
-      layers: [
-        new TileLayer({
-          source: new OSM(),
-        }),
-        vectorLayer,
-        analysisLayer,
-      ],
-      view: new View({
-        center: fromLonLat([35.24, 38.96]),
-        zoom: 5.5,
-      }),
-    })
+    analysisSourceRef.current =
+      analysisSource
 
-    mapRef.current = map
+    const vectorLayer =
+      new VectorLayer({
+        source: vectorSource,
+        style: createGeometryStyle,
+        zIndex: 20,
+      })
 
-    const loadSavedGeometries = async () => {
-      try {
-        const currentToken = localStorage.getItem('token') || token
+    vectorLayerRef.current =
+      vectorLayer
 
-        if (!currentToken) {
-          onLogout()
-          return
+    const updateGeometryCounts =
+      () => {
+        const nextCounts = {
+          point: 0,
+          line: 0,
+          polygon: 0,
         }
 
-        const payloadPart = currentToken.split('.')[1]
+        vectorSource
+          .getFeatures()
+          .forEach((feature) => {
+            const id =
+              feature.get('id')
 
-        if (!payloadPart) {
-          throw new Error('Geçersiz oturum anahtarı.')
-        }
+            const type =
+              feature.get('type')
 
-        const normalizedPayload = payloadPart
-          .replace(/-/g, '+')
-          .replace(/_/g, '/')
-
-        const paddedPayload = normalizedPayload.padEnd(
-          Math.ceil(normalizedPayload.length / 4) * 4,
-          '='
-        )
-
-        const payload = JSON.parse(atob(paddedPayload))
-
-        const userId =
-          payload.userId ??
-          payload.user_id ??
-          payload.id ??
-          payload.nameid ??
-          payload.sub ??
-          payload[
-            'http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier'
-          ]
-
-        if (!userId) {
-          throw new Error(
-            'Token içerisinden kullanıcı ID bulunamadı.'
-          )
-        }
-
-        const headers = {
-          Authorization: `Bearer ${currentToken}`,
-        }
-
-        const [
-          pointsResponse,
-          linesResponse,
-          polygonsResponse,
-        ] = await Promise.all([
-          fetch(
-            `${GEOSERVER_API_URL}/points?userId=${encodeURIComponent(userId)}`,
-            { method: 'GET', headers }
-          ),
-          fetch(
-            `${GEOSERVER_API_URL}/lines?userId=${encodeURIComponent(userId)}`,
-            { method: 'GET', headers }
-          ),
-          fetch(
-            `${GEOSERVER_API_URL}/polygons?userId=${encodeURIComponent(userId)}`,
-            { method: 'GET', headers }
-          ),
-        ])
-
-        if (
-          pointsResponse.status === 401 ||
-          linesResponse.status === 401 ||
-          polygonsResponse.status === 401
-        ) {
-          onLogout()
-          return
-        }
-
-        if (
-          !pointsResponse.ok ||
-          !linesResponse.ok ||
-          !polygonsResponse.ok
-        ) {
-          throw new Error(
-            'GeoServer üzerinden çizimler getirilemedi.'
-          )
-        }
-
-        const [pointsData, linesData, polygonsData] =
-          await Promise.all([
-            pointsResponse.json(),
-            linesResponse.json(),
-            polygonsResponse.json(),
-          ])
-
-        const geoJsonFormat = new GeoJSON()
-
-        const addFeatures = (data, type) => {
-          const features = geoJsonFormat.readFeatures(data, {
-            dataProjection: 'EPSG:4326',
-            featureProjection: 'EPSG:3857',
-          })
-
-          features.forEach((feature) => {
-            const rawId = feature.getId()
-            const numericId = Number(
-              String(rawId ?? '')
-                .split('.')
-                .pop()
-            )
-
-            if (Number.isFinite(numericId)) {
-              feature.set('id', numericId)
+            if (
+              id &&
+              type &&
+              Object.prototype
+                .hasOwnProperty.call(
+                  nextCounts,
+                  type
+                )
+            ) {
+              nextCounts[
+                type
+              ] += 1
             }
-
-            feature.set('type', type)
-            feature.set('name', feature.get('name') || '')
-            feature.set(
-              'color',
-              feature.get('color') || '#ff1744'
-            )
-
-            vectorSource.addFeature(feature)
           })
-        }
+
+        setGeometryCounts(
+          nextCounts
+        )
+      }
+
+    vectorSource.on(
+      'addfeature',
+      updateGeometryCounts
+    )
+
+    vectorSource.on(
+      'removefeature',
+      updateGeometryCounts
+    )
+
+    vectorSource.on(
+      'changefeature',
+      updateGeometryCounts
+    )
+
+    const cqlFilter =
+      `inserted_user_id=${currentUserId}`
+
+    const createWmsLayer =
+      (
+        layerName,
+        type,
+        zIndex,
+        styleName = ''
+      ) => {
+        const layer =
+          new TileLayer({
+            source:
+              new TileWMS({
+                url:
+                  GEOSERVER_WMS_URL,
+
+                params: {
+                  LAYERS:
+                    `basarsoft:${layerName}`,
+
+                  FORMAT:
+                    'image/png',
+
+                  TRANSPARENT:
+                    true,
+
+                  STYLES:
+                    styleName,
+
+                  TILED:
+                    false,
+
+                  cql_filter:
+                    cqlFilter,
+
+                  _v:
+                    Date.now(),
+                },
+
+                serverType:
+                  'geoserver',
+
+                transition: 0,
+              }),
+
+            visible:
+              layerVisibilityRef
+                .current[type],
+
+            zIndex,
+          })
+
+        wmsLayerRefs.current[
+          type
+        ] = layer
+
+        return layer
+      }
+
+    const polygonWmsLayer =
+      createWmsLayer(
+        'vw_polygon_active',
+        'polygon',
+        5,
+        'polygon_dynamic'
+      )
+
+    const lineWmsLayer =
+      createWmsLayer(
+        'vw_line_active',
+        'line',
+        6,
+        'line_dynamic'
+      )
+
+    const pointWmsLayer =
+      createWmsLayer(
+        'vw_point_active',
+        'point',
+        7,
+        'point_dynamic'
+      )
+
+    const heatmapWmsLayer =
+      new TileLayer({
+        source:
+          new TileWMS({
+            url:
+              GEOSERVER_WMS_URL,
+
+            params: {
+              LAYERS:
+                'basarsoft:vw_point_active',
+
+              STYLES:
+                'heatmap_dynamic',
+
+              FORMAT:
+                'image/png',
+
+              TRANSPARENT:
+                true,
+
+              TILED:
+                false,
+
+              cql_filter:
+                cqlFilter,
+
+              _v:
+                Date.now(),
+            },
+
+            serverType:
+              'geoserver',
+
+            transition: 0,
+          }),
+
+        visible: false,
+        zIndex: 8,
+      })
+
+    heatmapLayerRef.current =
+      heatmapWmsLayer
+
+    const analysisLayer =
+      new VectorLayer({
+        source: analysisSource,
+        style: analysisStyle,
+        zIndex: 30,
+      })
+
+    const map =
+      new Map({
+        target:
+          mapElementRef.current,
+
+        layers: [
+          new TileLayer({
+            source:
+              new OSM(),
+            zIndex: 0,
+          }),
+
+          polygonWmsLayer,
+          lineWmsLayer,
+          pointWmsLayer,
+          heatmapWmsLayer,
+
+          vectorLayer,
+          analysisLayer,
+        ],
+
+        view: new View({
+          center:
+            fromLonLat([
+              35.24,
+              38.96,
+            ]),
+
+          zoom: 5.5,
+        }),
+      })
+
+    mapRef.current =
+      map
+
+    const loadWfsGeometries =
+      async () => {
+        const layerConfigs = [
+          {
+            endpoint:
+              'points',
+            layer:
+              'vw_point_active',
+            type: 'point',
+          },
+          {
+            endpoint:
+              'lines',
+            layer:
+              'vw_line_active',
+            type: 'line',
+          },
+          {
+            endpoint:
+              'polygons',
+            layer:
+              'vw_polygon_active',
+            type: 'polygon',
+          },
+        ]
+
+        const geoJsonFormat =
+          new GeoJSON()
 
         vectorSource.clear()
 
-        addFeatures(pointsData, 'point')
-        addFeatures(linesData, 'line')
-        addFeatures(polygonsData, 'polygon')
-      } catch (error) {
-        console.error(error)
-        setMessage(
-          'Kayıtlı çizimler GeoServer üzerinden yüklenemedi.'
-        )
-      }
-    }
+        for (
+          const config
+          of layerConfigs
+        ) {
+          const response =
+            await fetch(
+              `${GEOSERVER_API_URL}/${config.endpoint}?userId=${currentUserId}`
+            )
 
-    loadSavedGeometries()
-
-    const handleMapClick = (event) => {
-      if (drawRef.current || modifyRef.current) return
-
-      const feature = map.forEachFeatureAtPixel(
-        event.pixel,
-        (foundFeature) => {
-          if (
-            foundFeature.get('id') &&
-            foundFeature.get('type')
-          ) {
-            return foundFeature
+          if (!response.ok) {
+            throw new Error(
+              `${config.layer} WFS verisi backend üzerinden alınamadı.`
+            )
           }
 
-          return null
+          const data =
+            await response.json()
+
+          const features =
+            geoJsonFormat
+              .readFeatures(
+                data,
+                {
+                  dataProjection:
+                    'EPSG:4326',
+
+                  featureProjection:
+                    'EPSG:3857',
+                }
+              )
+
+          features.forEach(
+            (feature) => {
+              const featureId =
+                String(
+                  feature.getId() ||
+                  ''
+                )
+
+              const match =
+                featureId.match(
+                  /\.(\d+)$/
+                )
+
+              const dbId =
+                Number(
+                  feature.get('id') ||
+                  (
+                    match
+                      ? match[1]
+                      : 0
+                  )
+                )
+
+              feature.set(
+                'id',
+                dbId
+              )
+
+              feature.set(
+                'type',
+                config.type
+              )
+
+              feature.set(
+                'name',
+                feature.get(
+                  'name'
+                ) || ''
+              )
+
+              feature.set(
+                'color',
+                feature.get(
+                  'color'
+                ) ||
+                '#ff1744'
+              )
+
+              feature.set(
+                'interactionVisible',
+                false
+              )
+
+              vectorSource
+                .addFeature(
+                  feature
+                )
+            }
+          )
         }
-      )
 
-      if (!feature) return
+        updateGeometryCounts()
+      }
 
-      originalGeometryRef.current =
-        feature.getGeometry().clone()
+    loadWfsGeometries()
+      .catch((error) => {
+        console.error(
+          'GeoServer WFS yükleme hatası:',
+          error
+        )
 
-      setSelectedFeature(feature)
-      setDetailName(feature.get('name') || '')
-      setDetailColor(
-        feature.get('color') || '#ff1744'
-      )
-      setDetailVisible(true)
-      setMessage('')
-    }
+        showToast(
+          'error',
+          'GeoServer',
+          'WFS verileri backend üzerinden yüklenemedi. Backend ve GeoServer çalışıyor mu kontrol et.'
+        )
+      })
 
-    map.on('singleclick', handleMapClick)
+    const handleMapClick =
+      (event) => {
+        if (
+          drawRef.current ||
+          modifyRef.current
+        ) {
+          return
+        }
+
+        const coordinate =
+          event.coordinate
+
+        const resolution =
+          map
+            .getView()
+            .getResolution() || 1
+
+        // Yaklaşık 12 piksellik tıklama toleransı.
+        const maxDistance =
+          resolution * 12
+
+        let feature = null
+        let bestDistance =
+          Number.POSITIVE_INFINITY
+
+        vectorSource
+          .getFeatures()
+          .forEach(
+            (candidate) => {
+              const id =
+                candidate.get('id')
+
+              const type =
+                candidate.get('type')
+
+              if (
+                !id ||
+                !type ||
+                layerVisibilityRef
+                  .current[type] === false
+              ) {
+                return
+              }
+
+              const geometry =
+                candidate
+                  .getGeometry()
+
+              if (!geometry) {
+                return
+              }
+
+              // Polygon içine tıklanırsa mesafe 0 kabul edilir.
+              if (
+                typeof geometry
+                  .intersectsCoordinate ===
+                  'function' &&
+                geometry
+                  .intersectsCoordinate(
+                    coordinate
+                  )
+              ) {
+                if (
+                  0 <
+                  bestDistance
+                ) {
+                  feature =
+                    candidate
+
+                  bestDistance = 0
+                }
+
+                return
+              }
+
+              const closest =
+                geometry
+                  .getClosestPoint(
+                    coordinate
+                  )
+
+              const dx =
+                closest[0] -
+                coordinate[0]
+
+              const dy =
+                closest[1] -
+                coordinate[1]
+
+              const distance =
+                Math.sqrt(
+                  dx * dx +
+                  dy * dy
+                )
+
+              if (
+                distance <=
+                  maxDistance &&
+                distance <
+                  bestDistance
+              ) {
+                feature =
+                  candidate
+
+                bestDistance =
+                  distance
+              }
+            }
+          )
+
+        if (!feature) {
+          return
+        }
+
+        originalGeometryRef.current =
+          feature
+            .getGeometry()
+            .clone()
+
+        setSelectedFeature(
+          feature
+        )
+
+        setDetailName(
+          feature.get(
+            'name'
+          ) || ''
+        )
+
+        setDetailColor(
+          feature.get(
+            'color'
+          ) ||
+          '#ff1744'
+        )
+
+        setDetailVisible(
+          true
+        )
+
+        setMessage('')
+      }
+
+    map.on(
+      'singleclick',
+      handleMapClick
+    )
 
     return () => {
-      map.un('singleclick', handleMapClick)
+      map.un(
+        'singleclick',
+        handleMapClick
+      )
 
-      if (drawRef.current) {
+      if (
+        drawRef.current
+      ) {
         map.removeInteraction(
           drawRef.current
         )
       }
 
-      if (modifyRef.current) {
+      if (
+        modifyRef.current
+      ) {
         map.removeInteraction(
           modifyRef.current
         )
       }
 
-      map.setTarget(undefined)
+      vectorSource.un(
+        'addfeature',
+        updateGeometryCounts
+      )
+
+      vectorSource.un(
+        'removefeature',
+        updateGeometryCounts
+      )
+
+      vectorSource.un(
+        'changefeature',
+        updateGeometryCounts
+      )
+
+      map.setTarget(
+        undefined
+      )
+
       mapRef.current = null
+      vectorLayerRef.current =
+        null
+
+      wmsLayerRefs.current = {
+        point: null,
+        line: null,
+        polygon: null,
+      }
+
+      heatmapLayerRef.current =
+        null
     }
-  }, [onLogout])
+  }, [
+    currentUserId,
+    onLogout,
+  ])
+
 
   useEffect(() => {
     if (!token) return
@@ -397,6 +1156,23 @@ function MapPage({ token, onLogout, onOpenAdmin }) {
         setIsAdmin(
           data.isAdmin || false
         )
+
+        const authorizationUserId =
+          Number(
+            data.userId ||
+            data.user_id
+          )
+
+        if (
+          Number.isFinite(
+            authorizationUserId
+          ) &&
+          authorizationUserId > 0
+        ) {
+          setCurrentUserId(
+            authorizationUserId
+          )
+        }
       } catch (error) {
         console.error(
           'Yetki bilgileri alınamadı:',
@@ -461,6 +1237,35 @@ function MapPage({ token, onLogout, onOpenAdmin }) {
       '0'
     )}`
   }
+
+  const goToTurkey = () => {
+    const map = mapRef.current
+
+    if (!map) {
+      return
+    }
+
+    removeCurrentDrawInteraction()
+    removeModifyInteraction()
+
+    map.getView().animate({
+      center: fromLonLat([
+        35.24,
+        38.96,
+      ]),
+      zoom: 5.5,
+      duration: 500,
+    })
+
+    setSelectedType(null)
+
+    showToast(
+      'info',
+      'Harita',
+      'Türkiye görünümüne dönüldü.'
+    )
+  }
+
 
   const checkGeometryAuthorization =
     async (feature) => {
@@ -545,6 +1350,37 @@ function MapPage({ token, onLogout, onOpenAdmin }) {
     setMessage('')
     setSelectedType(type)
 
+    if (
+      type === 'point' ||
+      type === 'line' ||
+      type === 'polygon'
+    ) {
+      setLayerVisibility(
+        (previous) => {
+          if (previous[type]) {
+            return previous
+          }
+
+          const next = {
+            ...previous,
+            [type]: true,
+          }
+
+          layerVisibilityRef.current =
+            next
+
+          wmsLayerRefs.current[
+            type
+          ]?.setVisible(true)
+
+          vectorLayerRef.current
+            ?.changed()
+
+          return next
+        }
+      )
+    }
+
     let geometryType
 
     if (type === 'point') {
@@ -593,8 +1429,17 @@ function MapPage({ token, onLogout, onOpenAdmin }) {
                 drawnFeature
               )
 
-            setMessage(
+            const geoMessage =
               'Bu alan coğrafi yetki sınırlarınızın dışında. Buraya çizim yapamazsınız.'
+
+            setMessage(
+              geoMessage
+            )
+
+            showToast(
+              'error',
+              'Coğrafi Yetki',
+              geoMessage
             )
 
             setPopupVisible(false)
@@ -631,9 +1476,18 @@ function MapPage({ token, onLogout, onOpenAdmin }) {
               drawnFeature
             )
 
-          setMessage(
+          const geoErrorMessage =
             error.message ||
-              'Coğrafi yetki kontrolü yapılamadı.'
+            'Coğrafi yetki kontrolü yapılamadı.'
+
+          setMessage(
+            geoErrorMessage
+          )
+
+          showToast(
+            'error',
+            'Coğrafi Yetki',
+            geoErrorMessage
           )
 
           setPopupVisible(false)
@@ -818,7 +1672,15 @@ function MapPage({ token, onLogout, onOpenAdmin }) {
           geometryColor
         )
 
+        pendingFeature.set(
+          'interactionVisible',
+          false
+        )
+
         pendingFeature.changed()
+
+        refreshGeometryCounts()
+        refreshWmsLayers()
 
         if (
           pendingType === 'point'
@@ -826,10 +1688,22 @@ function MapPage({ token, onLogout, onOpenAdmin }) {
           setMessage(
             'Nokta başarıyla kaydedildi.'
           )
+
+          showToast(
+            'success',
+            'Başarılı',
+            'Nokta başarıyla kaydedildi.'
+          )
         } else if (
           pendingType === 'line'
         ) {
           setMessage(
+            'Çizgi başarıyla kaydedildi.'
+          )
+
+          showToast(
+            'success',
+            'Başarılı',
             'Çizgi başarıyla kaydedildi.'
           )
         } else if (
@@ -845,8 +1719,17 @@ function MapPage({ token, onLogout, onOpenAdmin }) {
             if (
               count !== null
             ) {
-              setMessage(
+              const polygonMessage =
                 `Poligon kaydedildi. ${count} envanter ile kesişiyor.`
+
+              setMessage(
+                polygonMessage
+              )
+
+              showToast(
+                'success',
+                'Başarılı',
+                polygonMessage
               )
             }
           } catch (
@@ -856,8 +1739,17 @@ function MapPage({ token, onLogout, onOpenAdmin }) {
               analysisError
             )
 
-            setMessage(
+            const polygonWarning =
               'Poligon kaydedildi fakat envanter analizi yapılamadı.'
+
+            setMessage(
+              polygonWarning
+            )
+
+            showToast(
+              'warn',
+              'Uyarı',
+              polygonWarning
             )
           }
         }
@@ -881,9 +1773,18 @@ function MapPage({ token, onLogout, onOpenAdmin }) {
       } catch (error) {
         console.error(error)
 
-        setMessage(
+        const saveErrorMessage =
           error.message ||
-            'Çizim veritabanına kaydedilemedi.'
+          'Çizim veritabanına kaydedilemedi.'
+
+        setMessage(
+          saveErrorMessage
+        )
+
+        showToast(
+          'error',
+          'Kayıt Hatası',
+          saveErrorMessage
         )
       } finally {
         setSaving(false)
@@ -967,14 +1868,29 @@ function MapPage({ token, onLogout, onOpenAdmin }) {
             if (
               count !== null
             ) {
-              setMessage(
+              const analysisMessage =
                 `Envanter Analizi: ${count} envanter ile kesişiyor.`
+
+              setMessage(
+                analysisMessage
+              )
+
+              showToast(
+                'info',
+                'Envanter Analizi',
+                analysisMessage
               )
             }
           } catch (error) {
             console.error(error)
 
             setMessage(
+              'Envanter analizi yapılamadı.'
+            )
+
+            showToast(
+              'error',
+              'Analiz Hatası',
               'Envanter analizi yapılamadı.'
             )
           }
@@ -1025,6 +1941,12 @@ function MapPage({ token, onLogout, onOpenAdmin }) {
     setMessage(
       'Çizim modu durduruldu.'
     )
+
+    showToast(
+      'info',
+      'Çizim',
+      'Çizim modu durduruldu.'
+    )
   }
 
   const startGeometryEdit =
@@ -1041,6 +1963,13 @@ function MapPage({ token, onLogout, onOpenAdmin }) {
 
       removeCurrentDrawInteraction()
       removeModifyInteraction()
+
+      selectedFeature.set(
+        'interactionVisible',
+        true
+      )
+
+      selectedFeature.changed()
 
       const modify =
         new Modify({
@@ -1074,6 +2003,11 @@ function MapPage({ token, onLogout, onOpenAdmin }) {
       selectedFeature.setGeometry(
         originalGeometryRef.current
           .clone()
+      )
+
+      selectedFeature.set(
+        'interactionVisible',
+        false
       )
 
       selectedFeature.changed()
@@ -1157,13 +2091,27 @@ function MapPage({ token, onLogout, onOpenAdmin }) {
                 .clone()
             )
 
+            selectedFeature.set(
+              'interactionVisible',
+              false
+            )
+
             selectedFeature.changed()
           }
 
           removeModifyInteraction()
 
-          setMessage(
+          const updateGeoMessage =
             'Bu geometri coğrafi yetki sınırlarınızın dışında. Güncelleme yapılamaz.'
+
+          setMessage(
+            updateGeoMessage
+          )
+
+          showToast(
+            'error',
+            'Coğrafi Yetki',
+            updateGeoMessage
           )
 
           return
@@ -1223,7 +2171,14 @@ function MapPage({ token, onLogout, onOpenAdmin }) {
           detailColor
         )
 
+        selectedFeature.set(
+          'interactionVisible',
+          false
+        )
+
         selectedFeature.changed()
+
+        refreshWmsLayers()
 
         removeModifyInteraction()
 
@@ -1241,12 +2196,27 @@ function MapPage({ token, onLogout, onOpenAdmin }) {
         setMessage(
           'Obje başarıyla güncellendi.'
         )
+
+        showToast(
+          'success',
+          'Başarılı',
+          'Obje başarıyla güncellendi.'
+        )
       } catch (error) {
         console.error(error)
 
-        setMessage(
+        const updateErrorMessage =
           error.message ||
-            'Obje güncellenemedi.'
+          'Obje güncellenemedi.'
+
+        setMessage(
+          updateErrorMessage
+        )
+
+        showToast(
+          'error',
+          'Güncelleme Hatası',
+          updateErrorMessage
         )
       } finally {
         setDetailSaving(false)
@@ -1340,15 +2310,33 @@ function MapPage({ token, onLogout, onOpenAdmin }) {
           false
         )
 
+        refreshGeometryCounts()
+        refreshWmsLayers()
+
         setMessage(
+          'Obje başarıyla silindi.'
+        )
+
+        showToast(
+          'success',
+          'Başarılı',
           'Obje başarıyla silindi.'
         )
       } catch (error) {
         console.error(error)
 
-        setMessage(
+        const deleteErrorMessage =
           error.message ||
-            'Obje silinemedi.'
+          'Obje silinemedi.'
+
+        setMessage(
+          deleteErrorMessage
+        )
+
+        showToast(
+          'error',
+          'Silme Hatası',
+          deleteErrorMessage
         )
       } finally {
         setDetailSaving(
@@ -1450,6 +2438,11 @@ function MapPage({ token, onLogout, onOpenAdmin }) {
 
   return (
     <div className="map-page">
+      <Toast
+        ref={toastRef}
+        position="top-right"
+      />
+
       <header>
         <h2>
           Türkiye Haritası
@@ -1471,11 +2464,53 @@ function MapPage({ token, onLogout, onOpenAdmin }) {
         </div>
       </header>
 
-      <div className="drawing-toolbar">
-        <div className="drawing-title">
-          Çizim Araçları
-        </div>
-
+      <div
+        style={{
+          position: 'absolute',
+          top: '82px',
+          left: '22px',
+          zIndex: 1000,
+        }}
+      >
+        {!drawingToolsOpen ? (
+          <Button
+            label="Çizim Araçları"
+            icon="pi pi-chevron-down"
+            onClick={() =>
+              setDrawingToolsOpen(
+                true
+              )
+            }
+            style={{
+              borderRadius: '10px',
+              fontWeight: 700,
+              boxShadow:
+                '0 6px 18px rgba(0, 0, 0, 0.18)',
+            }}
+          />
+        ) : (
+          <div
+            className="drawing-toolbar"
+            style={{
+              position: 'relative',
+              top: 'auto',
+              left: 'auto',
+              right: 'auto',
+              margin: 0,
+              width: 'auto',
+              maxWidth:
+                'calc(100vw - 44px)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '10px',
+              flexWrap: 'wrap',
+              padding: '10px 12px',
+              paddingRight: '48px',
+              borderRadius: '12px',
+              boxShadow:
+                '0 8px 24px rgba(0, 0, 0, 0.22)',
+            }}
+          >
         {hasPermission(
           'Point Ekleme'
         ) && (
@@ -1565,6 +2600,93 @@ function MapPage({ token, onLogout, onOpenAdmin }) {
         )}
 
         <Button
+          label={
+            heatmapVisible
+              ? 'Isı Haritasını Kapat'
+              : 'Isı Haritası Analizi'
+          }
+          icon="pi pi-chart-bar"
+          severity={
+            heatmapVisible
+              ? 'warning'
+              : 'secondary'
+          }
+          outlined={
+            !heatmapVisible
+          }
+          onClick={
+            toggleHeatmap
+          }
+        />
+
+        <div
+          title="Kayıtlı geometri sayıları"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '9px',
+            padding: '7px 10px',
+            borderRadius: '9px',
+            border:
+              '1px solid rgba(255,255,255,0.16)',
+            background:
+              'rgba(255,255,255,0.07)',
+            color: '#ffffff',
+            fontSize: '13px',
+            fontWeight: 600,
+            whiteSpace: 'nowrap',
+          }}
+        >
+          <span>
+            📍 {geometryCounts.point}
+          </span>
+
+          <span>
+            ━ {geometryCounts.line}
+          </span>
+
+          <span>
+            ▰ {geometryCounts.polygon}
+          </span>
+        </div>
+
+        <Button
+          label="Katmanlar"
+          icon="pi pi-clone"
+          severity="secondary"
+          outlined
+          onClick={() =>
+            setLayerDialogVisible(
+              true
+            )
+          }
+        />
+
+        <Button
+          label="Geri Al"
+          icon="pi pi-undo"
+          severity="secondary"
+          outlined
+          onClick={
+            undoLastDrawPoint
+          }
+          disabled={
+            !selectedType ||
+            selectedType === 'point'
+          }
+        />
+
+        <Button
+          label="Türkiye'ye Dön"
+          icon="pi pi-home"
+          severity="secondary"
+          outlined
+          onClick={
+            goToTurkey
+          }
+        />
+
+        <Button
           label="Durdur"
           icon="pi pi-times"
           className="stop-drawing-button"
@@ -1582,18 +2704,275 @@ function MapPage({ token, onLogout, onOpenAdmin }) {
             }
           />
         )}
-      </div>
 
-      {message && (
-        <div className="map-message">
-          {message}
-        </div>
-      )}
+            <Button
+              icon="pi pi-chevron-up"
+              rounded
+              text
+              aria-label="Çizim araçlarını kapat"
+              onClick={() =>
+                setDrawingToolsOpen(
+                  false
+                )
+              }
+              style={{
+                position: 'absolute',
+                right: '8px',
+                top: '50%',
+                transform:
+                  'translateY(-50%)',
+                color: '#ffffff',
+              }}
+            />
+          </div>
+        )}
+      </div>
 
       <div
         ref={mapElementRef}
         className="map"
       />
+
+      {heatmapVisible && (
+        <div
+          style={{
+            position: 'absolute',
+            right: '22px',
+            bottom: '22px',
+            zIndex: 1000,
+            width: '250px',
+            padding: '14px 16px',
+            borderRadius: '12px',
+            background:
+              'rgba(255, 255, 255, 0.96)',
+            boxShadow:
+              '0 8px 24px rgba(0, 0, 0, 0.18)',
+            border:
+              '1px solid rgba(15, 23, 42, 0.10)',
+          }}
+        >
+          <div
+            style={{
+              fontWeight: 800,
+              color: '#0f172a',
+              marginBottom: '8px',
+              fontSize: '14px',
+            }}
+          >
+            Isı Haritası Yoğunluğu
+          </div>
+
+          <div
+            style={{
+              height: '14px',
+              borderRadius: '999px',
+              background:
+                'linear-gradient(90deg, #0000FF 0%, #00BFFF 25%, #00FF00 50%, #FFFF00 75%, #FF0000 100%)',
+              marginBottom: '7px',
+              border:
+                '1px solid rgba(15, 23, 42, 0.12)',
+            }}
+          />
+
+          <div
+            style={{
+              display: 'flex',
+              justifyContent:
+                'space-between',
+              color: '#475569',
+              fontSize: '12px',
+              fontWeight: 600,
+            }}
+          >
+            <span>0</span>
+            <span>0.25</span>
+            <span>0.50</span>
+            <span>0.75</span>
+            <span>1</span>
+          </div>
+
+          <div
+            style={{
+              display: 'flex',
+              justifyContent:
+                'space-between',
+              marginTop: '5px',
+              color: '#64748b',
+              fontSize: '11px',
+            }}
+          >
+            <span>Düşük</span>
+            <span>Yüksek</span>
+          </div>
+        </div>
+      )}
+
+      <Dialog
+        header="Katman Yönetimi"
+        visible={
+          layerDialogVisible
+        }
+        style={{
+          width: '430px',
+        }}
+        modal
+        onHide={() =>
+          setLayerDialogVisible(
+            false
+          )
+        }
+      >
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '10px',
+          }}
+        >
+          <div
+            style={{
+              color: '#64748b',
+              fontSize: '14px',
+              marginBottom: '4px',
+            }}
+          >
+            Haritada görmek istediğin
+            geometri katmanlarını yönet.
+          </div>
+
+          {[
+            {
+              key: 'point',
+              label: 'Noktalar',
+              icon: 'pi pi-map-marker',
+              count: geometryCounts.point,
+            },
+            {
+              key: 'line',
+              label: 'Çizgiler',
+              icon: 'pi pi-minus',
+              count: geometryCounts.line,
+            },
+            {
+              key: 'polygon',
+              label: 'Poligonlar',
+              icon: 'pi pi-stop',
+              count: geometryCounts.polygon,
+            },
+          ].map((layer) => {
+            const isVisible =
+              layerVisibility[
+                layer.key
+              ]
+
+            return (
+              <div
+                key={layer.key}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent:
+                    'space-between',
+                  gap: '12px',
+                  padding:
+                    '12px 14px',
+                  borderRadius:
+                    '10px',
+                  border:
+                    '1px solid #e2e8f0',
+                  background:
+                    '#f8fafc',
+                }}
+              >
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '10px',
+                  }}
+                >
+                  <i
+                    className={
+                      layer.icon
+                    }
+                    style={{
+                      fontSize:
+                        '16px',
+                    }}
+                  />
+
+                  <div>
+                    <div
+                      style={{
+                        fontWeight:
+                          700,
+                        color:
+                          '#0f172a',
+                      }}
+                    >
+                      {layer.label}
+                    </div>
+
+                    <div
+                      style={{
+                        fontSize:
+                          '12px',
+                        color:
+                          '#64748b',
+                        marginTop:
+                          '2px',
+                      }}
+                    >
+                      {layer.count}{' '}
+                      kayıtlı obje
+                    </div>
+                  </div>
+                </div>
+
+                <Button
+                  label={
+                    isVisible
+                      ? 'Gizle'
+                      : 'Göster'
+                  }
+                  icon={
+                    isVisible
+                      ? 'pi pi-eye-slash'
+                      : 'pi pi-eye'
+                  }
+                  size="small"
+                  severity={
+                    isVisible
+                      ? 'secondary'
+                      : 'success'
+                  }
+                  outlined
+                  onClick={() =>
+                    toggleLayerVisibility(
+                      layer.key
+                    )
+                  }
+                />
+              </div>
+            )
+          })}
+
+          <Button
+            label="Tüm Katmanları Göster"
+            icon="pi pi-eye"
+            severity="secondary"
+            outlined
+            onClick={
+              showAllLayers
+            }
+            style={{
+              marginTop:
+                '6px',
+            }}
+          />
+        </div>
+      </Dialog>
+
 
       <Dialog
         header="Öznitelik Bilgileri"

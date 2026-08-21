@@ -9,36 +9,58 @@ namespace backend_new.Controllers
     {
         private readonly GeoServerService _geoServerService;
 
-        public GeoServerController(GeoServerService geoServerService)
+        public GeoServerController(
+            GeoServerService geoServerService)
         {
             _geoServerService = geoServerService;
         }
 
         [HttpGet("points")]
-        public async Task<IActionResult> GetPoints(int userId)
+        public async Task<IActionResult> GetPoints(
+            int userId)
         {
             var result = await _geoServerService
-                .GetLayerAsync("tbl_point", userId);
+                .GetLayerAsync(
+                    "vw_point_active",
+                    userId
+                );
 
-            return Content(result, "application/json");
+            return Content(
+                result,
+                "application/json"
+            );
         }
 
         [HttpGet("lines")]
-        public async Task<IActionResult> GetLines(int userId)
+        public async Task<IActionResult> GetLines(
+            int userId)
         {
             var result = await _geoServerService
-                .GetLayerAsync("tbl_line", userId);
+                .GetLayerAsync(
+                    "vw_line_active",
+                    userId
+                );
 
-            return Content(result, "application/json");
+            return Content(
+                result,
+                "application/json"
+            );
         }
 
         [HttpGet("polygons")]
-        public async Task<IActionResult> GetPolygons(int userId)
+        public async Task<IActionResult> GetPolygons(
+            int userId)
         {
             var result = await _geoServerService
-                .GetLayerAsync("tbl_polygon", userId);
+                .GetLayerAsync(
+                    "vw_polygon_active",
+                    userId
+                );
 
-            return Content(result, "application/json");
+            return Content(
+                result,
+                "application/json"
+            );
         }
     }
 }

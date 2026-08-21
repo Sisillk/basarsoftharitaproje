@@ -10,7 +10,7 @@ import './AdminPanel.css';
 const API_URL = 'http://localhost:5092/api/admin';
 
 function AdminPanel({ token, onBack, onLogout }) {
-    const [page, setPage] = useState('users');
+    const [page, setPage] = useState('dashboard');
 
     const [users, setUsers] = useState([]);
     const [roles, setRoles] = useState([]);
@@ -708,6 +708,19 @@ function AdminPanel({ token, onBack, onLogout }) {
 
                 <button
                     className={
+                        page === 'dashboard'
+                            ? 'admin-nav active'
+                            : 'admin-nav'
+                    }
+                    onClick={() =>
+                        setPage('dashboard')
+                    }
+                >
+                    Dashboard
+                </button>
+
+                <button
+                    className={
                         page === 'users'
                             ? 'admin-nav active'
                             : 'admin-nav'
@@ -757,6 +770,326 @@ function AdminPanel({ token, onBack, onLogout }) {
 
 
             <main className="admin-content">
+
+                {page === 'dashboard' && (
+                    <>
+                        <div className="admin-header">
+                            <div>
+                                <h1>
+                                    Dashboard
+                                </h1>
+
+                                <p>
+                                    Sistem genel durumunu
+                                    hızlıca görüntüle.
+                                </p>
+                            </div>
+                        </div>
+
+                        <div
+                            style={{
+                                display: 'grid',
+                                gridTemplateColumns:
+                                    'repeat(auto-fit, minmax(210px, 1fr))',
+                                gap: '18px',
+                                marginBottom: '24px'
+                            }}
+                        >
+                            <div
+                                className="admin-card"
+                                style={{
+                                    padding: '20px',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'space-between',
+                                    gap: '14px'
+                                }}
+                            >
+                                <div>
+                                    <div
+                                        style={{
+                                            fontSize: '13px',
+                                            color: '#64748b',
+                                            marginBottom: '8px'
+                                        }}
+                                    >
+                                        Toplam Kullanıcı
+                                    </div>
+
+                                    <div
+                                        style={{
+                                            fontSize: '32px',
+                                            fontWeight: 800,
+                                            color: '#0f172a'
+                                        }}
+                                    >
+                                        {users.length}
+                                    </div>
+                                </div>
+
+                                <div
+                                    style={{
+                                        width: '48px',
+                                        height: '48px',
+                                        borderRadius: '12px',
+                                        display: 'grid',
+                                        placeItems: 'center',
+                                        background: '#eff6ff',
+                                        color: '#2563eb',
+                                        fontSize: '20px'
+                                    }}
+                                >
+                                    <i className="pi pi-users" />
+                                </div>
+                            </div>
+
+                            <div
+                                className="admin-card"
+                                style={{
+                                    padding: '20px',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'space-between',
+                                    gap: '14px'
+                                }}
+                            >
+                                <div>
+                                    <div
+                                        style={{
+                                            fontSize: '13px',
+                                            color: '#64748b',
+                                            marginBottom: '8px'
+                                        }}
+                                    >
+                                        Aktif Kullanıcı
+                                    </div>
+
+                                    <div
+                                        style={{
+                                            fontSize: '32px',
+                                            fontWeight: 800,
+                                            color: '#0f172a'
+                                        }}
+                                    >
+                                        {
+                                            users.filter(
+                                                user =>
+                                                    user.isActive
+                                            ).length
+                                        }
+                                    </div>
+                                </div>
+
+                                <div
+                                    style={{
+                                        width: '48px',
+                                        height: '48px',
+                                        borderRadius: '12px',
+                                        display: 'grid',
+                                        placeItems: 'center',
+                                        background: '#ecfdf5',
+                                        color: '#059669',
+                                        fontSize: '20px'
+                                    }}
+                                >
+                                    <i className="pi pi-user-plus" />
+                                </div>
+                            </div>
+
+                            <div
+                                className="admin-card"
+                                style={{
+                                    padding: '20px',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'space-between',
+                                    gap: '14px'
+                                }}
+                            >
+                                <div>
+                                    <div
+                                        style={{
+                                            fontSize: '13px',
+                                            color: '#64748b',
+                                            marginBottom: '8px'
+                                        }}
+                                    >
+                                        Toplam Rol
+                                    </div>
+
+                                    <div
+                                        style={{
+                                            fontSize: '32px',
+                                            fontWeight: 800,
+                                            color: '#0f172a'
+                                        }}
+                                    >
+                                        {roles.length}
+                                    </div>
+                                </div>
+
+                                <div
+                                    style={{
+                                        width: '48px',
+                                        height: '48px',
+                                        borderRadius: '12px',
+                                        display: 'grid',
+                                        placeItems: 'center',
+                                        background: '#f5f3ff',
+                                        color: '#7c3aed',
+                                        fontSize: '20px'
+                                    }}
+                                >
+                                    <i className="pi pi-id-card" />
+                                </div>
+                            </div>
+
+                            <div
+                                className="admin-card"
+                                style={{
+                                    padding: '20px',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'space-between',
+                                    gap: '14px'
+                                }}
+                            >
+                                <div>
+                                    <div
+                                        style={{
+                                            fontSize: '13px',
+                                            color: '#64748b',
+                                            marginBottom: '8px'
+                                        }}
+                                    >
+                                        Toplam Yetki
+                                    </div>
+
+                                    <div
+                                        style={{
+                                            fontSize: '32px',
+                                            fontWeight: 800,
+                                            color: '#0f172a'
+                                        }}
+                                    >
+                                        {permissions.length}
+                                    </div>
+                                </div>
+
+                                <div
+                                    style={{
+                                        width: '48px',
+                                        height: '48px',
+                                        borderRadius: '12px',
+                                        display: 'grid',
+                                        placeItems: 'center',
+                                        background: '#fff7ed',
+                                        color: '#ea580c',
+                                        fontSize: '20px'
+                                    }}
+                                >
+                                    <i className="pi pi-shield" />
+                                </div>
+                            </div>
+                        </div>
+
+                        <div
+                            className="admin-card"
+                            style={{
+                                padding: '20px'
+                            }}
+                        >
+                            <h3
+                                style={{
+                                    marginTop: 0,
+                                    marginBottom: '16px'
+                                }}
+                            >
+                                Sistem Özeti
+                            </h3>
+
+                            <div
+                                style={{
+                                    display: 'grid',
+                                    gridTemplateColumns:
+                                        'repeat(auto-fit, minmax(180px, 1fr))',
+                                    gap: '12px'
+                                }}
+                            >
+                                <div
+                                    style={{
+                                        padding: '14px',
+                                        borderRadius: '10px',
+                                        background: '#f8fafc',
+                                        border: '1px solid #e2e8f0'
+                                    }}
+                                >
+                                    <strong>
+                                        Pasif Kullanıcı
+                                    </strong>
+
+                                    <div
+                                        style={{
+                                            marginTop: '6px',
+                                            color: '#64748b'
+                                        }}
+                                    >
+                                        {
+                                            users.filter(
+                                                user =>
+                                                    !user.isActive
+                                            ).length
+                                        } kullanıcı
+                                    </div>
+                                </div>
+
+                                <div
+                                    style={{
+                                        padding: '14px',
+                                        borderRadius: '10px',
+                                        background: '#f8fafc',
+                                        border: '1px solid #e2e8f0'
+                                    }}
+                                >
+                                    <strong>
+                                        Rol Yönetimi
+                                    </strong>
+
+                                    <div
+                                        style={{
+                                            marginTop: '6px',
+                                            color: '#64748b'
+                                        }}
+                                    >
+                                        {roles.length} aktif rol
+                                    </div>
+                                </div>
+
+                                <div
+                                    style={{
+                                        padding: '14px',
+                                        borderRadius: '10px',
+                                        background: '#f8fafc',
+                                        border: '1px solid #e2e8f0'
+                                    }}
+                                >
+                                    <strong>
+                                        Yetkilendirme
+                                    </strong>
+
+                                    <div
+                                        style={{
+                                            marginTop: '6px',
+                                            color: '#64748b'
+                                        }}
+                                    >
+                                        {permissions.length} izin tanımlı
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </>
+                )}
 
                 {page === 'users' && (
                     <>

@@ -15,8 +15,10 @@ namespace backend_new.Services
             string layerName,
             int userId)
         {
+            // Kullanıcı bazlı dinamik filtreleme
+            // is_deleted = false kontrolü SQL View içinde yapılıyor.
             var filter =
-                $"inserted_user_id={userId} AND is_deleted=false AND is_active=true";
+                $"inserted_user_id={userId}";
 
             var url =
                 "http://localhost:8080/geoserver/basarsoft/ows" +

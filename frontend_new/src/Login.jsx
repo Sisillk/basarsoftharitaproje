@@ -48,28 +48,53 @@ function Login({ onLogin }) {
 
       <div className="login-layout">
         <section className="login-info">
-          <div className="project-badge">TÜRKİYE HARİTASI</div>
-          <h1>Başarsoft</h1>
+
+          <div className="project-badge">
+            TÜRKİYE HARİTASI
+          </div>
+
+          <img
+            src="/basarsoftfoto.jpg"
+            alt="Başarsoft Logo"
+            style={{
+              width: '500px',
+              maxWidth: '80%',
+              height: 'auto',
+              objectFit: 'contain',
+              borderRadius: '10px',
+              marginTop: '20px',
+            }}
+          />
+
         </section>
 
         <section className="login-card">
           <div className="login-card-header">
+
             <div className="map-icon">
               <span>⌖</span>
             </div>
 
             <h2>Giriş Yap</h2>
-            <p>Harita ekranına devam etmek için bilgilerinizi girin.</p>
+
+            <p>
+              Harita ekranına devam etmek için bilgilerinizi girin.
+            </p>
+
           </div>
 
           <form onSubmit={handleSubmit}>
+
             <div className="form-group">
               <label>Kullanıcı Adı</label>
+
               <input
                 type="text"
                 placeholder="Kullanıcı adınız"
                 value={username}
-                onChange={(e) => setUsername(e.target.value)}
+                onChange={(e) =>
+                  setUsername(e.target.value)
+                }
                 autoComplete="username"
                 required
               />
@@ -79,11 +104,18 @@ function Login({ onLogin }) {
               <label>Şifre</label>
 
               <div className="password-field">
+
                 <input
-                  type={showPassword ? 'text' : 'password'}
+                  type={
+                    showPassword
+                      ? 'text'
+                      : 'password'
+                  }
                   placeholder="Şifreniz"
                   value={password}
-                  onChange={(e) => setPassword(e.target.value)}
+                  onChange={(e) =>
+                    setPassword(e.target.value)
+                  }
                   autoComplete="current-password"
                   required
                 />
@@ -91,10 +123,17 @@ function Login({ onLogin }) {
                 <button
                   type="button"
                   className="show-password"
-                  onClick={() => setShowPassword(!showPassword)}
+                  onClick={() =>
+                    setShowPassword(
+                      !showPassword
+                    )
+                  }
                 >
-                  {showPassword ? 'Gizle' : 'Göster'}
+                  {showPassword
+                    ? 'Gizle'
+                    : 'Göster'}
                 </button>
+
               </div>
             </div>
 
@@ -103,8 +142,11 @@ function Login({ onLogin }) {
               type="submit"
               disabled={loading}
             >
-              {loading ? 'Giriş yapılıyor...' : 'Haritaya Git →'}
+              {loading
+                ? 'Giriş yapılıyor...'
+                : 'Haritaya Git →'}
             </button>
+
           </form>
 
           {error && (
@@ -117,6 +159,7 @@ function Login({ onLogin }) {
             <span className="meta-dot"></span>
             Güvenli oturum • 10 dakika
           </div>
+
         </section>
       </div>
     </div>
